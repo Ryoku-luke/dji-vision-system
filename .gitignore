@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+*.egg-info/
+
+# 模型文件 (体积大, 不纳入版本控制)
+models/
+*.pt
+*.onnx
+*.mlpackage
+*.bin
+*.xml
+
+# 数据集 (校准用, 可按需下载)
+datasets/
+
+# 输出文件
+output/
+*.mp4
+*.avi
+*.jpg
+*.png
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
