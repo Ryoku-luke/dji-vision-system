@@ -101,12 +101,15 @@ class VisionSystem:
                 output_path=DISPLAY.output_path,
                 fps=DISPLAY.output_fps,
             )
-            if not self.video_writer.open((CAMERA.width, CAMERA.height)):
+            # 使用摄像头实际分辨率, 而非配置中的请求分辨率
+            actual_width = int(self.camera.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_height = int(self.camera.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if not self.video_writer.open((actual_width, actual_height)):
                 logger.warning("视频输出初始化失败, 将忽略保存功能")
                 self.video_writer = None
 
         logger.info("\n系统初始化完成!")
-        logger.info(f"  模型: {MODEL.model_name} ({'INT8' if MODEL.int8 else 'FP32'})")
+        logger.info(f"  模型: {MODEL.model_name} ({'INT8' if MODEL.int8 else 'FP16' if MODEL.half else 'FP32'})")
         logger.info(f"  设备: {self.detector.device}")
         logger.info(f"  分辨率: {CAMERA.width}x{CAMERA.height} @ {CAMERA.fps}fps")
         logger.info(f"  置信度阈值: {self.detector.conf_threshold}")

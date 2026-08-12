@@ -5,7 +5,7 @@ DJI 运动相机 + Intel Core Ultra 7 155H 视觉识别系统
 所有可调参数集中在此文件管理
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 

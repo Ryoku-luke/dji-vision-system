@@ -20,7 +20,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 from config import MODEL, CLASSES
@@ -93,10 +92,10 @@ class OpenVINODetector:
         conf_threshold: float = None,
         iou_threshold: float = None,
     ):
-        self.model_path = model_path or MODEL.exported_path
-        self.device = device or MODEL.inference_device
-        self.conf_threshold = conf_threshold or MODEL.conf_threshold
-        self.iou_threshold = iou_threshold or MODEL.iou_threshold
+        self.model_path = model_path if model_path is not None else MODEL.exported_path
+        self.device = device if device is not None else MODEL.inference_device
+        self.conf_threshold = conf_threshold if conf_threshold is not None else MODEL.conf_threshold
+        self.iou_threshold = iou_threshold if iou_threshold is not None else MODEL.iou_threshold
 
         self.model = None
         self._is_loaded = False
@@ -128,10 +127,14 @@ class OpenVINODetector:
             logger.info("模型加载成功, 设备验证通过")
         except Exception as e:
             logger.warning(f"设备 {self.device} 验证失败: {e}")
-            logger.warning(f"回退到 CPU 模式")
+            logger.warning("回退到 CPU 模式")
             self.device = "intel:cpu"
-            self.model.predict(dummy, device=self.device, verbose=False)
-            logger.info("已回退到 CPU 模式")
+            try:
+                self.model.predict(dummy, device=self.device, verbose=False)
+                logger.info("已回退到 CPU 模式")
+            except Exception as e2:
+                logger.error(f"CPU 模式验证也失败: {e2}")
+                return False
 
         self._is_loaded = True
         return True

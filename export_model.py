@@ -13,12 +13,15 @@
 import argparse
 import sys
 import shutil
+import logging
 from pathlib import Path
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import MODEL
+
+logger = logging.getLogger(__name__)
 
 
 def export_model(model_name: str = None, export_device: str = "cpu"):
@@ -45,12 +48,15 @@ def export_model(model_name: str = None, export_device: str = "cpu"):
     if not model_path.exists():
         print(f"\n[1/3] 下载模型: {name}")
         MODEL.models_dir.mkdir(parents=True, exist_ok=True)
-        # YOLO 构造时会自动下载到当前目录
+        # YOLO 构造时会自动下载到当前工作目录
         yolo = YOLO(name)
-        # 移动到 models 目录
+        # 移动到 models 目录 (下载路径相对于 CWD)
         downloaded = Path(name)
         if downloaded.exists():
             shutil.move(str(downloaded), str(model_path))
+        else:
+            # 某些版本可能下载到 ~/.config/ultralytics 或其他位置
+            logger.warning(f"未在当前目录找到下载的模型文件 {name}, 请检查模型路径")
         print(f"      模型已保存到: {model_path}")
     else:
         print(f"\n[1/3] 模型已存在: {model_path}")
@@ -129,10 +135,17 @@ def benchmark_model(model_path: Path = None):
     )
 
     print(f"\n基准测试结果:")
-    print(f"  推理速度: {results.get('inference_time', 'N/A')} ms/im")
-    fps = 1000 / results.get('inference_time', float('inf')) if results.get('inference_time') else 0
-    print(f"  对应帧率: {fps:.1f} FPS")
-    print(f"  mAP50-95: {results.get('metrics/mAP50-95(B)', 'N/A')}")
+    # Ultralytics benchmark 返回的键名兼容多种版本
+    inference_time = results.get('speed/inference') or results.get('inference_time')
+    map_val = results.get('metrics/mAP50-95(B)') or results.get('mAP50-95(B)')
+    if inference_time is not None:
+        print(f"  推理速度: {inference_time:.2f} ms/im")
+        fps = 1000.0 / inference_time if inference_time > 0 else 0.0
+        print(f"  对应帧率: {fps:.1f} FPS")
+    else:
+        print(f"  推理速度: N/A")
+        print(f"  对应帧率: N/A")
+    print(f"  mAP50-95: {map_val if map_val is not None else 'N/A'}")
 
     return results
 

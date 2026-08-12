@@ -11,7 +11,7 @@ from collections import deque
 import cv2
 import numpy as np
 
-from config import DISPLAY, CLASSES
+from config import DISPLAY
 from detector import Detection, DetectionResult
 
 logger = logging.getLogger(__name__)
