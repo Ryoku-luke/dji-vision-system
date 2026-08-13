@@ -1,8 +1,4 @@
-"""
-可视化模块
-====================
-负责在视频帧上绘制检测结果 (边界框、标签、FPS 等)
-"""
+"""Visualization: draw detection results on video frames / 可视化: 在视频帧上绘制检测结果."""
 
 import time
 import logging
@@ -13,11 +9,11 @@ import numpy as np
 
 from config import DISPLAY
 from detector import Detection, DetectionResult
+from messages import t
 
 logger = logging.getLogger(__name__)
 
-
-# 类别颜色调色板 (BGR 格式, 每个类别一个固定颜色)
+# Class color palette (BGR), one fixed color per class / 类别颜色调色板 (BGR)
 COLOR_PALETTE = [
     (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
     (255, 0, 255), (0, 255, 255), (128, 0, 0), (0, 128, 0),
@@ -28,12 +24,11 @@ COLOR_PALETTE = [
 
 
 def get_color(class_id: int) -> tuple[int, int, int]:
-    """获取类别对应的颜色"""
     return COLOR_PALETTE[class_id % len(COLOR_PALETTE)]
 
 
 class FPSCounter:
-    """FPS 计数器 (滑动窗口平均)"""
+    """FPS counter (sliding-window average) / FPS 计数器 (滑动窗口平均)."""
 
     def __init__(self, window_size: int = 30):
         self.window_size = window_size
@@ -41,12 +36,7 @@ class FPSCounter:
         self._last_time = None
 
     def update(self) -> float:
-        """
-        记录一帧的时间戳, 返回当前平均 FPS
-
-        Returns:
-            滑动窗口平均 FPS
-        """
+        # Record a frame timestamp, return current average FPS / 记录一帧时间戳, 返回平均 FPS
         now = time.perf_counter()
         if self._last_time is not None:
             self.frame_times.append(now - self._last_time)
@@ -66,7 +56,7 @@ class FPSCounter:
 
 
 class Visualizer:
-    """检测结果可视化器"""
+    """Detection result visualizer / 检测结果可视化器."""
 
     def __init__(self):
         self.fps_counter = FPSCounter(window_size=30)
@@ -78,32 +68,21 @@ class Visualizer:
         extra_info: dict = None,
         mirror: bool = False,
     ) -> np.ndarray:
-        """
-        在帧上绘制检测结果
-
-        Args:
-            frame: 原始 BGR 图像
-            result: 检测结果
-            extra_info: 额外显示信息 (如 {"系统CPU": "45%"})
-            mirror: 是否水平镜像画面
-
-        Returns:
-            绘制后的 BGR 图像
-        """
+        """Draw detection results on the frame / 在帧上绘制检测结果."""
         output = frame.copy()
 
-        # 画面水平镜像 (相机倒装时使用)
+        # Horizontal mirror (for inverted camera mount) / 画面水平镜像 (相机倒装时使用)
         if mirror:
             output = cv2.flip(output, 1)
 
-        # 绘制检测框
+        # Draw detection boxes / 绘制检测框
         for det in result.detections:
             self._draw_detection(output, det)
 
-        # 更新 FPS
+        # Update FPS / 更新 FPS
         current_fps = self.fps_counter.update()
 
-        # 绘制信息面板
+        # Draw info panel / 绘制信息面板
         if DISPLAY.show_fps or extra_info:
             self._draw_info_panel(
                 output,
@@ -116,14 +95,14 @@ class Visualizer:
         return output
 
     def _draw_detection(self, frame: np.ndarray, det: Detection):
-        """绘制单个检测结果"""
+        """Draw a single detection / 绘制单个检测结果."""
         color = get_color(det.class_id)
         x1, y1, x2, y2 = int(det.x1), int(det.y1), int(det.x2), int(det.y2)
 
-        # 绘制边界框
+        # Bounding box / 边界框
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, DISPLAY.box_thickness)
 
-        # 构建标签文本
+        # Build label text / 构建标签文本
         parts = []
         if DISPLAY.show_class_name:
             parts.append(det.class_name)
@@ -132,12 +111,12 @@ class Visualizer:
         label = " ".join(parts)
 
         if label:
-            # 计算标签背景尺寸
+            # Label background size / 标签背景尺寸
             (tw, th), baseline = cv2.getTextSize(
                 label, cv2.FONT_HERSHEY_SIMPLEX, DISPLAY.font_scale, 1
             )
 
-            # 绘制标签背景
+            # Label background / 标签背景
             label_y = max(y1, th + 4)
             cv2.rectangle(
                 frame,
@@ -147,7 +126,7 @@ class Visualizer:
                 cv2.FILLED,
             )
 
-            # 绘制标签文字
+            # Label text / 标签文字
             cv2.putText(
                 frame,
                 label,
@@ -167,9 +146,10 @@ class Visualizer:
         inference_ms: float,
         extra_info: dict,
     ):
-        """绘制左上角信息面板"""
+        """Draw the top-left info panel / 绘制左上角信息面板."""
         lines = []
 
+        # Panel labels stay in English (drawn on video) / 面板标签保持英文 (绘制在视频上)
         if DISPLAY.show_fps:
             lines.append(f"FPS: {fps:.1f}")
             lines.append(f"Inference: {inference_ms:.1f}ms")
@@ -181,7 +161,7 @@ class Visualizer:
         if not lines:
             return
 
-        # 计算面板尺寸
+        # Panel size / 面板尺寸
         font = cv2.FONT_HERSHEY_SIMPLEX
         scale = 0.5
         thickness = 1
@@ -196,12 +176,12 @@ class Visualizer:
         panel_w = max_width + padding * 2
         panel_h = len(lines) * line_height + padding
 
-        # 绘制半透明背景
+        # Semi-transparent background / 半透明背景
         overlay = frame.copy()
         cv2.rectangle(overlay, (0, 0), (panel_w, panel_h), (0, 0, 0), cv2.FILLED)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
 
-        # 绘制文字
+        # Draw text / 绘制文字
         for i, line in enumerate(lines):
             y = padding + (i + 1) * line_height - 6
             cv2.putText(
@@ -216,12 +196,11 @@ class Visualizer:
             )
 
     def reset_fps(self):
-        """重置 FPS 计数器 (例如暂停后恢复时)"""
         self.fps_counter.reset()
 
 
 class VideoWriter:
-    """视频输出写入器"""
+    """Video output writer / 视频输出写入器."""
 
     def __init__(self, output_path, fps: int = 30, resolution: tuple = None):
         self.output_path = str(output_path)
@@ -230,7 +209,7 @@ class VideoWriter:
         self.writer = None
 
     def open(self, resolution: tuple = None):
-        """打开视频写入器"""
+        """Open the video writer / 打开视频写入器."""
         res = resolution or self.resolution
         if res is None:
             raise ValueError("请指定视频分辨率")
@@ -241,19 +220,19 @@ class VideoWriter:
         )
 
         if not self.writer.isOpened():
-            logger.error(f"无法创建视频文件: {self.output_path}")
+            logger.error(t("video_out_fail", path=self.output_path))
             return False
 
-        logger.info(f"视频输出: {self.output_path} ({res[0]}x{res[1]} @ {self.fps}fps)")
+        logger.info(t("video_out_created", path=self.output_path, w=res[0], h=res[1], fps=self.fps))
         return True
 
     def write(self, frame: np.ndarray):
-        """写入一帧"""
+        """Write a frame / 写入一帧."""
         if self.writer is not None:
             self.writer.write(frame)
 
     def close(self):
-        """释放资源"""
+        """Release resources / 释放资源."""
         if self.writer is not None:
             self.writer.release()
             self.writer = None

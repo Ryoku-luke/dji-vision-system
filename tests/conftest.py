@@ -1,12 +1,4 @@
-"""
-pytest 全局配置
-=================
-1. 将项目根目录加入 sys.path, 使测试可直接 import 项目模块
-2. 当环境中缺失 opencv-python (cv2) 时, 注入一个最小桩模块,
-   保证依赖 cv2 的源码模块 (camera_capture / visualizer / main)
-   能被正常导入, 从而测试其非硬件相关逻辑
-3. 提供公共 fixtures
-"""
+"""Pytest global config: add project root to sys.path, stub cv2 if missing, and provide shared fixtures."""
 
 import sys
 import types
@@ -14,28 +6,20 @@ from pathlib import Path
 
 import pytest
 
-
-# ============================================================
-# 1. 项目根目录加入 sys.path
-# ============================================================
-# conftest.py 所在目录为 tests/, 其上一级即项目根目录
+# Add project root to sys.path / 将项目根目录加入 sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
-# ============================================================
-# 2. cv2 桩模块 (仅在真实 cv2 缺失时启用)
-# ============================================================
-# 让测试在 "无 OpenCV" 环境下也能导入 camera_capture.py / main.py
+# Stub cv2 module when OpenCV is not installed / 缺失 cv2 时注入最小桩模块
 try:
-    import cv2  # noqa: F401  试图导入真实 cv2
+    import cv2  # noqa: F401  try importing real cv2
 except ImportError:
     from unittest.mock import MagicMock
 
     _cv2_stub = types.ModuleType("cv2")
 
-    # OpenCV VideoCapture / VideoWriter 属性常量桩 (取值与官方一致, 仅作占位)
+    # OpenCV constant stubs (values match the official constants)
     _CONSTS = {
         "CAP_PROP_FRAME_WIDTH": 3,
         "CAP_PROP_FRAME_HEIGHT": 4,
@@ -49,7 +33,7 @@ except ImportError:
     for _name, _val in _CONSTS.items():
         setattr(_cv2_stub, _name, _val)
 
-    # 用 MagicMock 占位所有可能的函数 / 类, 调用时不报错
+    # MagicMock placeholders for all functions / classes
     _cv2_stub.VideoCapture = MagicMock()
     _cv2_stub.VideoWriter = MagicMock()
     _cv2_stub.VideoWriter_fourcc = MagicMock(return_value=0)
@@ -66,24 +50,15 @@ except ImportError:
     sys.modules["cv2"] = _cv2_stub
 
 
-# ============================================================
-# 3. 公共 fixtures
-# ============================================================
 @pytest.fixture
 def project_root() -> Path:
-    """返回项目根目录路径"""
+    """Return the project root path / 返回项目根目录路径"""
     return PROJECT_ROOT
 
 
 @pytest.fixture
 def make_detection():
-    """
-    工厂 fixture: 快速构造 detector.Detection 实例
-
-    用法:
-        det = make_detection(x1=10, y1=20, x2=110, y2=220,
-                             confidence=0.9, class_id=0, class_name="person")
-    """
+    """Factory fixture to build detector.Detection instances / 工厂 fixture 构造 Detection 实例"""
     from detector import Detection
 
     def _create(

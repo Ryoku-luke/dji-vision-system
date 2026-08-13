@@ -1,21 +1,21 @@
 """
-预导出模型下载脚本
-====================
-从 GitHub Release 下载预导出的 OpenVINO INT8 模型
+Pre-exported model download script.
+预导出模型下载脚本。
 
-解决 H-05: 模型分发问题
-用户无需自行下载原始权重和执行 INT8 校准（耗时长且需联网），
-可以直接下载预导出的 OpenVINO INT8 模型, 快速开始使用。
+Download pre-exported OpenVINO INT8 models from a GitHub Release.
+Users can skip downloading raw weights and running INT8 calibration
+(time-consuming and requires network access) by fetching a ready-to-use
+OpenVINO INT8 model directly.
 
-用法:
-    python download_model.py                    # 下载默认模型 (yolo26s)
-    python download_model.py --model yolo26m    # 下载指定模型
-    python download_model.py --list             # 列出可用模型及其大小
-    python download_model.py --force            # 覆盖已存在的模型
+Usage / 用法:
+    python download_model.py                    # Download default model (yolo26s)
+    python download_model.py --model yolo26m    # Download a specific model
+    python download_model.py --list             # List available models and sizes
+    python download_model.py --force            # Overwrite an existing model
 
-注意:
-    Release 可能尚未创建, 下载失败时请参考错误提示,
-    或使用 python export_model.py 手动导出模型。
+Note / 注意:
+    The Release may not exist yet. If download fails, follow the error
+    message, or use `python export_model.py` to export the model manually.
 """
 
 import argparse
@@ -27,30 +27,25 @@ import urllib.error
 from pathlib import Path
 
 
-# ============================================================
-# 配置常量
-# ============================================================
-
-# GitHub 仓库信息
+# GitHub repo info / GitHub 仓库信息
 GITHUB_OWNER = "Ryoku-luke"
 GITHUB_REPO = "dji-vision-system"
 
-# Release 版本号 (预导出模型所在的 Release)
+# Release version (where pre-exported models are hosted) / Release 版本号
 RELEASE_VERSION = "v1.0.0"
 
-# 下载 URL 模板
-# 格式: https://github.com/{owner}/{repo}/releases/download/{version}/{asset_name}
+# Download URL template / 下载 URL 模板
 DOWNLOAD_URL_TEMPLATE = (
     "https://github.com/{owner}/{repo}/releases/download/{version}/{asset}"
 )
 
-# 项目根目录与导出目录
+# Project root and exported dir / 项目根目录与导出目录
 PROJECT_ROOT = Path(__file__).parent
 EXPORTED_DIR = PROJECT_ROOT / "models" / "exported"
 
-# 可用模型列表及其参考信息
-# size_mb: INT8 量化后 OpenVINO 模型的预估大小 (含 .bin + .xml + metadata.yaml)
-# inference_ms / fps: 基于 Intel Core Ultra 7 155H Arc GPU 的实测数据 (来自 README)
+# Available models and reference info / 可用模型列表及其参考信息
+# size_mb: estimated INT8 OpenVINO model size (.bin + .xml + metadata.yaml)
+# inference_ms / fps: measured on Intel Core Ultra 7 155H Arc GPU (from README)
 AVAILABLE_MODELS = {
     "yolo26n": {
         "description": "Nano 模型 - 速度优先, 精度要求低",
@@ -85,45 +80,24 @@ AVAILABLE_MODELS = {
 }
 
 
-# ============================================================
-# ModelDownloader 类: 封装下载逻辑
-# ============================================================
-
 class ModelDownloader:
-    """预导出 OpenVINO INT8 模型下载器"""
+    """Downloader for pre-exported OpenVINO INT8 models. 预导出模型下载器。"""
 
     def __init__(self, version: str = RELEASE_VERSION):
-        """
-        初始化下载器
+        """Init the downloader.
 
         Args:
-            version: Release 版本号 (如 "v1.0.0")
+            version: Release version (e.g. "v1.0.0").
         """
         self.version = version
         self.exported_dir = EXPORTED_DIR
 
     def get_model_dir(self, model_name: str) -> Path:
-        """
-        获取模型的目标目录路径
-
-        Args:
-            model_name: 模型名称 (如 "yolo26s")
-
-        Returns:
-            模型目录路径 (如 models/exported/yolo26s_int8_openvino_model)
-        """
+        """Return the target model directory path."""
         return self.exported_dir / f"{model_name}_int8_openvino_model"
 
     def get_download_url(self, model_name: str) -> str:
-        """
-        构建 Release 资产下载 URL
-
-        Args:
-            model_name: 模型名称 (如 "yolo26s")
-
-        Returns:
-            完整的下载 URL
-        """
+        """Build the Release asset download URL."""
         asset_name = f"{model_name}_int8_openvino_model.zip"
         return DOWNLOAD_URL_TEMPLATE.format(
             owner=GITHUB_OWNER,
@@ -134,15 +108,7 @@ class ModelDownloader:
 
     @staticmethod
     def format_size(size_bytes: int) -> str:
-        """
-        将字节数格式化为人类可读的字符串
-
-        Args:
-            size_bytes: 文件大小 (字节)
-
-        Returns:
-            格式化后的大小字符串 (如 "10.3 MB")
-        """
+        """Format a byte count into a human-readable string (e.g. "10.3 MB")."""
         if size_bytes < 1024:
             return f"{size_bytes} B"
         elif size_bytes < 1024 * 1024:
@@ -154,18 +120,17 @@ class ModelDownloader:
 
     @staticmethod
     def print_progress(downloaded: int, total: int):
-        """
-        打印下载进度条 (不依赖 tqdm, 使用简单的 print 实现)
+        """Print a download progress bar (no tqdm dependency).
 
         Args:
-            downloaded: 已下载字节数
-            total: 总字节数 (为 0 表示无法获取总大小)
+            downloaded: bytes downloaded so far.
+            total: total bytes (0 means unknown).
         """
         bar_length = 40
 
         if total <= 0:
-            # 无法获取总大小时, 只显示已下载量
-            print(f"\r  下载中... {ModelDownloader.format_size(downloaded)}", end="", flush=True)
+            # Unknown total size: only show downloaded amount / 未知总大小时仅显示已下载量
+            print(f"\r  Downloading / 下载中... {ModelDownloader.format_size(downloaded)}", end="", flush=True)
             return
 
         percent = min(downloaded / total, 1.0)
@@ -176,43 +141,33 @@ class ModelDownloader:
         print(f"\r  [{bar}] {percent_str} ({size_str})", end="", flush=True)
 
     def _check_existing(self, model_name: str, force: bool) -> bool:
-        """
-        检查目标路径是否已存在模型
-
-        Args:
-            model_name: 模型名称
-            force: 是否强制覆盖
+        """Check whether the target model already exists.
 
         Returns:
-            True 表示可以继续下载, False 表示应中止
+            True to continue downloading, False to abort.
         """
         model_dir = self.get_model_dir(model_name)
         if not model_dir.exists():
             return True
 
         if not force:
-            print(f"模型已存在: {model_dir}")
-            print(f"如需重新下载, 请使用 --force 参数:")
+            print(f"Model already exists / 模型已存在: {model_dir}")
+            print(f"To re-download, use the --force flag / 如需重新下载, 请使用 --force 参数:")
             print(f"  python download_model.py --model {model_name} --force")
             return False
 
-        print(f"已有模型将被覆盖: {model_dir}")
+        print(f"Existing model will be overwritten / 已有模型将被覆盖: {model_dir}")
         return True
 
     def _download_file(self, url: str, dest: Path) -> int:
-        """
-        执行文件下载, 显示进度条
-
-        Args:
-            url: 下载 URL
-            dest: 本地保存路径
+        """Download a file with a progress bar.
 
         Returns:
-            已下载的字节数, 失败时返回 -1
+            Bytes downloaded, or -1 on failure.
 
         Raises:
-            urllib.error.HTTPError: HTTP 错误 (如 404)
-            urllib.error.URLError: 网络错误
+            urllib.error.HTTPError: HTTP error (e.g. 404).
+            urllib.error.URLError: network error.
         """
         req = urllib.request.Request(
             url,
@@ -233,72 +188,66 @@ class ModelDownloader:
                     downloaded += len(chunk)
                     self.print_progress(downloaded, total_size)
 
-            print()  # 进度条换行
+            print()  # newline after progress bar / 进度条换行
 
             if total_size > 0 and downloaded < total_size:
+                print(f"Warning: download may be incomplete ({downloaded}/{total_size} bytes)")
                 print(f"警告: 下载可能不完整 ({downloaded}/{total_size} 字节)")
 
         return downloaded
 
     def _extract_model(self, zip_path: Path, model_name: str) -> Path:
-        """
-        解压模型压缩包到 exported 目录
+        """Extract a model archive into the exported directory.
 
-        支持两种压缩包结构:
-        1. 包含顶层目录: yolo26s_int8_openvino_model/yolo26s.bin ...
-        2. 直接包含文件: yolo26s.bin, yolo26s.xml, metadata.yaml
-
-        Args:
-            zip_path: 压缩包路径
-            model_name: 模型名称
-
-        Returns:
-            解压后的模型目录路径
+        Supports two archive layouts:
+        1. With a top-level dir: yolo26s_int8_openvino_model/yolo26s.bin ...
+        2. Flat files: yolo26s.bin, yolo26s.xml, metadata.yaml
 
         Raises:
-            RuntimeError: 解压后未找到有效的模型文件
+            RuntimeError: no valid model file found after extraction.
         """
         model_dir = self.get_model_dir(model_name)
         expected_dir_name = f"{model_name}_int8_openvino_model"
 
-        # 解压到临时目录
+        # Extract to a temp directory / 解压到临时目录
         temp_extract = self.exported_dir / f"_{model_name}_extract_tmp"
         if temp_extract.exists():
             shutil.rmtree(temp_extract)
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             namelist = zf.namelist()
-            print(f"  压缩包包含 {len(namelist)} 个文件")
+            print(f"  Archive contains {len(namelist)} files / 压缩包包含 {len(namelist)} 个文件")
             zf.extractall(temp_extract)
 
-        # 尝试定位解压后的模型目录
-        # 情况1: 顶层有同名的模型目录
+        # Locate the extracted model directory / 尝试定位解压后的模型目录
+        # Case 1: top-level dir with the expected name
         candidate = temp_extract / expected_dir_name
         if candidate.is_dir():
             source_dir = candidate
         else:
-            # 情况2: 遍历子目录, 找到包含 {model_name}.xml 的目录
+            # Case 2: search subdirs for one containing {model_name}.xml
             source_dir = None
             for item in temp_extract.rglob("*"):
                 if item.is_dir() and (item / f"{model_name}.xml").exists():
                     source_dir = item
                     break
             if source_dir is None:
-                # 情况3: 文件直接在临时目录根下
+                # Case 3: files are directly under the temp root
                 if (temp_extract / f"{model_name}.xml").exists():
                     source_dir = temp_extract
                 else:
                     shutil.rmtree(temp_extract)
                     raise RuntimeError(
-                        f"解压后未找到模型文件 {model_name}.xml, "
-                        f"请检查压缩包内容是否正确"
+                        f"Model file {model_name}.xml not found after extraction; "
+                        f"please check the archive contents. "
+                        f"/ 解压后未找到模型文件 {model_name}.xml, 请检查压缩包内容是否正确"
                     )
 
-        # 移动到目标位置
+        # Move to the target location / 移动到目标位置
         if model_dir.exists():
             shutil.rmtree(model_dir)
 
-        # 如果 source_dir 是 temp_extract 本身 (情况3), 需要创建目标目录再移动文件
+        # If source_dir is temp_extract itself (case 3), create the target dir and move files in
         if source_dir == temp_extract:
             model_dir.mkdir(parents=True, exist_ok=True)
             for item in source_dir.iterdir():
@@ -306,182 +255,166 @@ class ModelDownloader:
         else:
             shutil.move(str(source_dir), str(model_dir))
 
-        # 清理临时目录
+        # Clean up temp directory / 清理临时目录
         if temp_extract.exists():
             shutil.rmtree(temp_extract)
 
         return model_dir
 
     def _verify_model(self, model_dir: Path, model_name: str) -> bool:
-        """
-        验证模型文件完整性
-
-        检查必要的 .xml 和 .bin 文件是否存在
-
-        Args:
-            model_dir: 模型目录
-            model_name: 模型名称
-
-        Returns:
-            验证是否通过
-        """
+        """Verify model file integrity by checking for required .xml and .bin files."""
         required_files = [f"{model_name}.xml", f"{model_name}.bin"]
         missing = [f for f in required_files if not (model_dir / f).exists()]
         if missing:
-            print(f"错误: 缺少必要的模型文件: {', '.join(missing)}")
+            print(f"Error: missing required model files / 错误: 缺少必要的模型文件: {', '.join(missing)}")
             return False
         return True
 
     def download(self, model_name: str, force: bool = False) -> bool:
-        """
-        下载并解压模型
+        """Download and extract a model.
 
         Args:
-            model_name: 模型名称 (如 "yolo26s")
-            force: 是否覆盖已存在的模型
+            model_name: model name (e.g. "yolo26s").
+            force: overwrite an existing model.
 
         Returns:
-            下载是否成功
+            True on success.
         """
-        # 验证模型名称
+        # Validate model name / 验证模型名称
         if model_name not in AVAILABLE_MODELS:
-            print(f"错误: 不支持的模型 '{model_name}'")
-            print(f"可用模型: {', '.join(AVAILABLE_MODELS.keys())}")
+            print(f"Error: unsupported model '{model_name}' / 错误: 不支持的模型 '{model_name}'")
+            print(f"Available models / 可用模型: {', '.join(AVAILABLE_MODELS.keys())}")
             return False
 
-        # 检查目标路径是否已存在模型
+        # Check for an existing model / 检查目标路径是否已存在模型
         if not self._check_existing(model_name, force):
-            # 模型已存在且未指定 --force, 视为成功 (无需重复下载)
+            # Already present and no --force: treat as success (no re-download needed)
             return True
 
-        # 构建下载 URL
+        # Build download URL / 构建下载 URL
         url = self.get_download_url(model_name)
         info = AVAILABLE_MODELS[model_name]
 
         print("=" * 60)
-        print(f"  下载预导出模型: {model_name}")
-        print(f"  版本: {self.version}")
-        print(f"  来源: GitHub Release")
-        print(f"  描述: {info['description']}")
-        print(f"  预估大小: {info['size_mb']:.1f} MB")
+        print(f"  Download pre-exported model / 下载预导出模型: {model_name}")
+        print(f"  Version / 版本: {self.version}")
+        print(f"  Source / 来源: GitHub Release")
+        print(f"  Description / 描述: {info['description']}")
+        print(f"  Estimated size / 预估大小: {info['size_mb']:.1f} MB")
         print("=" * 60)
 
-        # 准备下载目录
+        # Prepare download directory / 准备下载目录
         self.exported_dir.mkdir(parents=True, exist_ok=True)
         temp_zip = self.exported_dir / f"_{model_name}_download_tmp.zip"
 
         try:
-            # ---- 第 1 步: 下载 ----
-            print(f"\n[1/3] 下载模型文件...")
+            # Step 1: download / 第 1 步: 下载
+            print(f"\n[1/3] Downloading model file / 下载模型文件...")
             print(f"  URL: {url}")
             downloaded_bytes = self._download_file(url, temp_zip)
-            print(f"  下载完成: {self.format_size(downloaded_bytes)}")
+            print(f"  Download complete / 下载完成: {self.format_size(downloaded_bytes)}")
 
-            # ---- 第 2 步: 解压 ----
-            print(f"\n[2/3] 解压模型文件...")
+            # Step 2: extract / 第 2 步: 解压
+            print(f"\n[2/3] Extracting model file / 解压模型文件...")
             model_dir = self._extract_model(temp_zip, model_name)
-            print(f"  解压完成: {model_dir}")
+            print(f"  Extraction complete / 解压完成: {model_dir}")
 
-            # 列出解压后的文件
+            # List extracted files / 列出解压后的文件
             for f in sorted(model_dir.iterdir()):
                 if f.is_file():
                     size = f.stat().st_size
                     print(f"    - {f.name} ({self.format_size(size)})")
 
-            # ---- 第 3 步: 验证 ----
-            print(f"\n[3/3] 验证模型文件...")
+            # Step 3: verify / 第 3 步: 验证
+            print(f"\n[3/3] Verifying model files / 验证模型文件...")
             if not self._verify_model(model_dir, model_name):
                 return False
-            print(f"  验证通过: 所有必要文件均存在")
+            print(f"  Verification passed: all required files present / 验证通过: 所有必要文件均存在")
 
-            # 计算实际大小
+            # Compute actual size / 计算实际大小
             total_size = sum(
                 f.stat().st_size for f in model_dir.rglob("*") if f.is_file()
             )
 
-            print(f"\n模型下载完成!")
-            print(f"  路径: {model_dir}")
-            print(f"  大小: {self.format_size(total_size)}")
-            print(f"\n现在可以运行 main.py 启动推理:")
+            print(f"\nModel download complete! / 模型下载完成!")
+            print(f"  Path / 路径: {model_dir}")
+            print(f"  Size / 大小: {self.format_size(total_size)}")
+            print(f"\nYou can now run main.py to start inference / 现在可以运行 main.py 启动推理:")
             print(f"  python main.py")
 
             return True
 
         except urllib.error.HTTPError as e:
-            print(f"\n下载失败: HTTP {e.code} {e.reason}")
+            print(f"\nDownload failed: HTTP {e.code} {e.reason}")
+            print(f"下载失败: HTTP {e.code} {e.reason}")
             if e.code == 404:
-                print(f"\n模型文件未找到 (HTTP 404)。可能的原因:")
-                print(f"  1. Release {self.version} 尚未创建")
-                print(f"  2. {model_name} 的预导出模型尚未上传到 Release")
-                print(f"  3. 模型名称拼写错误")
-                print(f"\n请检查 GitHub Release 页面:")
+                print(f"\nModel file not found (HTTP 404). Possible reasons / 模型文件未找到 (HTTP 404)。可能的原因:")
+                print(f"  1. Release {self.version} has not been created yet / Release {self.version} 尚未创建")
+                print(f"  2. The pre-exported model for {model_name} has not been uploaded / {model_name} 的预导出模型尚未上传到 Release")
+                print(f"  3. Misspelled model name / 模型名称拼写错误")
+                print(f"\nPlease check the GitHub Release page / 请检查 GitHub Release 页面:")
                 print(f"  https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases")
             elif e.code == 403:
-                print(f"\n访问被拒绝 (HTTP 403)。可能是速率限制, 请稍后重试。")
+                print(f"\nAccess denied (HTTP 403). This may be rate limiting, please retry later.")
+                print(f"访问被拒绝 (HTTP 403)。可能是速率限制, 请稍后重试。")
             else:
-                print(f"\n服务器返回错误状态码: {e.code}")
+                print(f"\nServer returned an error status code / 服务器返回错误状态码: {e.code}")
 
             self._print_alternative(model_name)
             return False
 
         except urllib.error.URLError as e:
-            print(f"\n网络错误: {e.reason}")
-            print(f"\n请检查网络连接后重试。")
+            print(f"\nNetwork error / 网络错误: {e.reason}")
+            print(f"\nPlease check your network connection and retry / 请检查网络连接后重试。")
             self._print_alternative(model_name)
             return False
 
         except zipfile.BadZipFile as e:
-            print(f"\n压缩包损坏: {e}")
-            print(f"下载的文件可能不完整或已损坏, 请重试。")
+            print(f"\nCorrupt archive / 压缩包损坏: {e}")
+            print(f"The downloaded file may be incomplete or corrupted, please retry / 下载的文件可能不完整或已损坏, 请重试。")
             self._print_alternative(model_name)
             return False
 
         except Exception as e:
-            print(f"\n下载过程中发生未知错误: {e}")
+            print(f"\nUnknown error during download / 下载过程中发生未知错误: {e}")
             self._print_alternative(model_name)
             return False
 
         finally:
-            # 清理临时下载文件
+            # Clean up temp download file / 清理临时下载文件
             if temp_zip.exists():
                 temp_zip.unlink()
-            # 清理可能残留的临时解压目录
+            # Clean up any leftover temp extract dir / 清理可能残留的临时解压目录
             temp_extract = self.exported_dir / f"_{model_name}_extract_tmp"
             if temp_extract.exists():
                 shutil.rmtree(temp_extract)
 
     @staticmethod
     def _print_alternative(model_name: str):
-        """
-        打印手动导出模型的替代方案提示
-
-        Args:
-            model_name: 模型名称
-        """
+        """Print the manual-export fallback instructions."""
         print(f"\n{'=' * 60}")
-        print(f"  替代方案: 手动导出模型")
+        print(f"  Alternative: export the model manually / 替代方案: 手动导出模型")
         print(f"{'=' * 60}")
+        print(f"If the pre-exported model cannot be downloaded, you can export it manually:")
         print(f"如果无法通过下载获取预导出模型, 可以手动导出:")
         print(f"")
         print(f"  python export_model.py --model {model_name}.pt")
         print(f"")
-        print(f"注意: 手动导出 INT8 模型需要:")
-        print(f"  1. 联网下载原始 PyTorch 权重")
-        print(f"  2. 联网下载 COCO128 校准数据集")
-        print(f"  3. 执行 INT8 量化校准 (耗时约 5-15 分钟)")
+        print(f"Note: manual INT8 export requires / 注意: 手动导出 INT8 模型需要:")
+        print(f"  1. Network access to download raw PyTorch weights / 联网下载原始 PyTorch 权重")
+        print(f"  2. Network access to download the COCO128 calibration dataset / 联网下载 COCO128 校准数据集")
+        print(f"  3. Running INT8 quantization calibration (~5-15 min) / 执行 INT8 量化校准 (耗时约 5-15 分钟)")
         print(f"{'=' * 60}")
 
 
-# ============================================================
-# list_available_models() 函数: 列出可用模型
-# ============================================================
-
 def list_available_models():
-    """列出所有可用的预导出模型及其参考信息"""
+    """List all available pre-exported models and their reference info."""
     print("=" * 75)
+    print("  Available pre-exported OpenVINO INT8 models")
     print("  可用的预导出 OpenVINO INT8 模型")
     print("=" * 75)
     print()
+    print(f"  {'Model':<12} {'Size':<10} {'Infer(ms)':<12} {'FPS':<10} {'Description'}")
     print(f"  {'模型':<12} {'大小':<10} {'推理(ms)':<12} {'帧率':<10} {'描述'}")
     print(f"  {'-' * 12} {'-' * 10} {'-' * 12} {'-' * 10} {'-' * 28}")
 
@@ -495,35 +428,33 @@ def list_available_models():
         )
 
     print()
-    print(f"  * 大小为预估值, 实际大小以下载为准")
-    print(f"  * 推理速度基于 Intel Core Ultra 7 155H Arc GPU 实测")
+    print(f"  * Sizes are estimates; actual size depends on the download / 大小为预估值, 实际大小以下载为准")
+    print(f"  * Inference speed measured on Intel Core Ultra 7 155H Arc GPU / 推理速度基于 Intel Core Ultra 7 155H Arc GPU 实测")
     print()
-    print(f"下载命令:")
-    print(f"  python download_model.py --model <模型名称>")
+    print(f"Download command / 下载命令:")
+    print(f"  python download_model.py --model <model_name>")
     print()
-    print(f"示例:")
-    print(f"  python download_model.py                    # 下载默认模型 (yolo26s)")
-    print(f"  python download_model.py --model yolo26m    # 下载 yolo26m")
-    print(f"  python download_model.py --list             # 列出可用模型")
+    print(f"Examples / 示例:")
+    print(f"  python download_model.py                    # Download default model (yolo26s) / 下载默认模型 (yolo26s)")
+    print(f"  python download_model.py --model yolo26m    # Download yolo26m / 下载 yolo26m")
+    print(f"  python download_model.py --list             # List available models / 列出可用模型")
 
-
-# ============================================================
-# main() 函数: CLI 入口
-# ============================================================
 
 def main():
-    """CLI 入口函数"""
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="预导出模型下载工具 - 从 GitHub Release 下载 OpenVINO INT8 模型",
+        description="Pre-exported model downloader - fetch OpenVINO INT8 models from GitHub Release / "
+                    "预导出模型下载工具 - 从 GitHub Release 下载 OpenVINO INT8 模型",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-示例:
-  python download_model.py                    # 下载默认模型 (yolo26s)
-  python download_model.py --model yolo26m    # 下载指定模型
-  python download_model.py --list             # 列出可用模型及其大小
-  python download_model.py --force            # 覆盖已存在的模型
+Examples / 示例:
+  python download_model.py                    # Download default model (yolo26s) / 下载默认模型 (yolo26s)
+  python download_model.py --model yolo26m    # Download a specific model / 下载指定模型
+  python download_model.py --list             # List available models and sizes / 列出可用模型及其大小
+  python download_model.py --force            # Overwrite an existing model / 覆盖已存在的模型
 
-替代方案:
+Alternative / 替代方案:
+  If the download fails (e.g. the Release does not exist yet), export the model manually:
   如果下载失败 (如 Release 尚未创建), 可以手动导出模型:
   python export_model.py --model yolo26s.pt
 """,
@@ -533,33 +464,33 @@ def main():
         type=str,
         default="yolo26s",
         choices=list(AVAILABLE_MODELS.keys()),
-        help="模型名称 (默认: yolo26s)",
+        help="Model name (default: yolo26s) / 模型名称 (默认: yolo26s)",
     )
     parser.add_argument(
         "--list",
         action="store_true",
-        help="列出可用模型及其大小",
+        help="List available models and sizes / 列出可用模型及其大小",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="覆盖已存在的模型",
+        help="Overwrite an existing model / 覆盖已存在的模型",
     )
     parser.add_argument(
         "--version",
         type=str,
         default=RELEASE_VERSION,
-        help=f"Release 版本号 (默认: {RELEASE_VERSION})",
+        help=f"Release version (default: {RELEASE_VERSION}) / Release 版本号 (默认: {RELEASE_VERSION})",
     )
 
     args = parser.parse_args()
 
-    # 列出可用模型
+    # List available models / 列出可用模型
     if args.list:
         list_available_models()
         return
 
-    # 下载模型
+    # Download the model / 下载模型
     downloader = ModelDownloader(version=args.version)
     success = downloader.download(args.model, force=args.force)
     sys.exit(0 if success else 1)

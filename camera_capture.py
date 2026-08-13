@@ -1,13 +1,8 @@
 """
-UVC 摄像头采集模块
-====================
-负责从 DJI Osmo Action 相机 (UVC 网络摄像头模式) 采集视频帧
-基于 OpenCV VideoCapture 实现
+UVC camera capture and video file reader module.
+UVC 摄像头采集与视频文件读取模块
 
-关键点:
-  - DJI 相机在 UVC 模式下被系统识别为标准 USB 摄像头
-  - Windows 上使用 MSMF (Media Foundation) 后端, 兼容性最好
-  - 设置 buffer_size=1 可最大限度降低取流延迟
+Captures frames from DJI Osmo Action cameras (UVC webcam mode) via OpenCV.
 """
 
 import time
@@ -16,12 +11,13 @@ import cv2
 import numpy as np
 
 from config import CAMERA
+from messages import t
 
 logger = logging.getLogger(__name__)
 
 
 class CameraCapture:
-    """UVC 摄像头采集器 / 视频文件读取器"""
+    """UVC camera capture / video file reader. UVC 摄像头采集器 / 视频文件读取器"""
 
     def __init__(
         self,
@@ -31,16 +27,7 @@ class CameraCapture:
         fps: int = None,
         source: str = None,
     ):
-        """
-        初始化采集器
-
-        Args:
-            device_index: UVC 设备索引 (默认使用 config)
-            width: 采集分辨率宽度
-            height: 采集分辨率高度
-            fps: 采集帧率
-            source: 视频文件路径 (指定后忽略 device_index, 从文件读取)
-        """
+        """Initialize the capture device."""
         self.source = source
         self._is_file = source is not None
 
@@ -59,52 +46,50 @@ class CameraCapture:
         self._is_running = False
 
     def open(self) -> bool:
-        """
-        打开摄像头设备或视频文件
-
-        Returns:
-            True 如果成功打开
-        """
+        """Open the camera device or video file."""
         if self._is_file:
             return self._open_file()
         else:
             return self._open_camera()
 
     def _open_camera(self) -> bool:
-        """打开 UVC 摄像头设备"""
-        logger.info(f"正在打开 UVC 摄像头 (设备索引: {self.device_index})...")
+        """Open the UVC camera device."""
+        logger.info(t("camera_opening", index=self.device_index))
 
-        # 使用 MSMF 后端 (Windows 推荐)
         self.cap = cv2.VideoCapture(self.device_index, CAMERA.api_preference)
 
         if not self.cap.isOpened():
-            logger.error(f"无法打开摄像头设备 {self.device_index}")
+            logger.error(t("camera_open_fail", index=self.device_index))
             logger.error("请检查:")
             logger.error("  1. DJI 相机已通过 Type-C 线连接电脑")
             logger.error("  2. 相机屏幕上已选择 '网络摄像头' 模式")
             logger.error("  3. 没有其他程序正在占用该摄像头")
             return False
 
+        # Set capture parameters
         # 设置采集参数
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self.cap.set(cv2.CAP_PROP_FPS, self.fps)
-        # 设置缓冲区为 1 帧, 降低延迟
+        # Buffer size of 1 frame to minimize latency
+        # 缓冲区设为 1 帧, 降低延迟
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, CAMERA.buffer_size)
 
-        # 验证实际参数 (部分相机不支持所有参数, 实际值可能不同)
+        # Verify actual params (some cameras ignore custom settings)
+        # 验证实际参数 (部分相机不支持所有参数)
         actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
 
-        # BUG-11 修复: 某些相机不报告 FPS, 实际值为 0.0
+        # Some cameras report FPS as 0.0
+        # 某些相机不报告 FPS, 实际值为 0.0
         fps_display = f"{actual_fps:.0f}" if actual_fps > 0 else "N/A"
-        logger.info(f"摄像头已打开: {actual_w}x{actual_h} @ {fps_display}fps")
+        logger.info(t("camera_opened", w=actual_w, h=actual_h, fps=fps_display))
 
         if actual_w != self.width or actual_h != self.height:
-            logger.warning(f"请求 {self.width}x{self.height}, 实际 {actual_w}x{actual_h}"
-                          f" (部分相机不支持自定义分辨率)")
+            logger.warning(t("res_mismatch", w=self.width, h=self.height, aw=actual_w, ah=actual_h))
 
+        # Update to actual values for downstream modules
         # 更新为实际值, 供后续模块使用
         self.width = actual_w
         self.height = actual_h
@@ -115,61 +100,49 @@ class CameraCapture:
         return True
 
     def _open_file(self) -> bool:
-        """打开视频文件"""
+        """Open a video file."""
         from pathlib import Path
 
         file_path = Path(self.source)
         if not file_path.exists():
-            logger.error(f"视频文件不存在: {self.source}")
+            logger.error(t("video_not_found", path=self.source))
             return False
 
-        logger.info(f"正在打开视频文件: {self.source}...")
+        logger.info(t("video_opening", path=self.source))
         self.cap = cv2.VideoCapture(str(file_path))
 
         if not self.cap.isOpened():
-            logger.error(f"无法打开视频文件: {self.source}")
+            logger.error(t("video_open_fail", path=self.source))
             return False
 
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        # BUG-12 修复: 使用显式 > 0 判断替代 or, 避免 falsy 语义不一致
+        # Use explicit > 0 check instead of or to avoid falsy semantics mismatch
+        # 使用显式 > 0 判断替代 or, 避免 falsy 语义不一致
         file_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
         self.fps = file_fps if file_fps > 0 else 30
 
         frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        logger.info(f"视频已打开: {self.width}x{self.height} @ {self.fps}fps, 共 {frame_count} 帧")
+        logger.info(t("video_opened", w=self.width, h=self.height, fps=self.fps, frames=frame_count))
 
         self._is_running = True
         return True
 
     def read(self) -> np.ndarray | None:
-        """
-        读取一帧画面
-
-        Returns:
-            BGR 格式的图像帧, 或 None (读取失败时)
-        """
+        """Read a single frame. Returns BGR image or None on failure."""
         if not self._is_running or self.cap is None:
-            logger.error("摄像头未打开, 请先调用 open()")
+            logger.error(t("camera_not_open"))
             return None
 
         ret, frame = self.cap.read()
         if not ret or frame is None:
-            logger.warning("读取帧失败, 可能是摄像头断开连接")
+            logger.warning(t("frame_read_fail"))
             return None
 
         return frame
 
     def read_batch(self, count: int = 1) -> list[np.ndarray]:
-        """
-        连续读取多帧 (用于预热或批量处理)
-
-        Args:
-            count: 读取帧数
-
-        Returns:
-            图像帧列表
-        """
+        """Read multiple consecutive frames (for warmup or batch processing)."""
         frames = []
         for _ in range(count):
             frame = self.read()
@@ -178,47 +151,42 @@ class CameraCapture:
         return frames
 
     def warmup(self, frames: int = 5):
-        """
-        预热: 读取若干帧丢弃, 让相机自动曝光/白平衡稳定
-
-        Args:
-            frames: 预热帧数
-        """
-        logger.info(f"摄像头预热中 ({frames} 帧)...")
+        """Warm up: read and discard frames to stabilize auto-exposure/white balance."""
+        logger.info(t("camera_warmup", frames=frames))
         for i in range(frames):
             self.read()
             time.sleep(0.05)
-        logger.info("预热完成")
+        logger.info(t("camera_warmup_done"))
 
     def list_devices(self) -> list[int]:
-        """
-        列出可用的摄像头设备索引 (逐个尝试打开)
-
-        Returns:
-            可用设备索引列表
-        """
+        """List available camera device indices by probing each one."""
         available = []
-        for i in range(5):  # 最多检查 5 个设备
+        for i in range(5):  # Check up to 5 devices
             cap = cv2.VideoCapture(i, CAMERA.api_preference)
             if cap.isOpened():
                 ret, _ = cap.read()
                 if ret:
                     available.append(i)
             cap.release()
-        logger.info(f"可用摄像头设备: {available}")
+        logger.info(t("camera_devices", devices=available))
         return available
 
     @property
     def is_running(self) -> bool:
         return self._is_running
 
+    @property
+    def is_file(self) -> bool:
+        """Whether the source is a video file rather than a live camera."""
+        return self._is_file
+
     def close(self):
-        """释放摄像头资源"""
+        """Release camera resources."""
         if self.cap is not None:
             self.cap.release()
             self.cap = None
         self._is_running = False
-        logger.info("摄像头已关闭")
+        logger.info(t("camera_closed"))
 
     def __enter__(self):
         self.open()

@@ -1,18 +1,6 @@
 """
-目标检测模块
-====================
-基于 YOLO 的目标检测推理引擎 (H-02: 多后端支持)
-
-核心流程:
-  1. 加载导出后的模型 (OpenVINO / CUDA / TensorRT)
-  2. 接收 BGR 图像帧
-  3. 预处理 (resize + normalize) -> 推理 -> 后处理 (NMS)
-  4. 返回检测结果 (边界框、类别、置信度)
-
-支持后端:
-  - OpenVINO: "intel:gpu" / "intel:npu" / "intel:cpu" (Intel 平台)
-  - CUDA:     "0" / "cpu" (NVIDIA 平台)
-  - TensorRT: "0" (NVIDIA 平台, 最快)
+Multi-backend YOLO object detection module (OpenVINO / CUDA / TensorRT).
+多后端 YOLO 目标检测模块 (OpenVINO / CUDA / TensorRT)
 """
 
 import time
@@ -23,20 +11,21 @@ from pathlib import Path
 import numpy as np
 
 from config import MODEL, CLASSES
+from messages import t
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class Detection:
-    """单个检测结果"""
-    x1: float          # 边界框左上角 x
-    y1: float          # 边界框左上角 y
-    x2: float          # 边界框右下角 x
-    y2: float          # 边界框右下角 y
-    confidence: float  # 置信度
-    class_id: int      # 类别 ID
-    class_name: str    # 类别名称
+    """Single detection result."""
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    confidence: float
+    class_id: int
+    class_name: str
 
     @property
     def bbox(self) -> tuple[float, float, float, float]:
@@ -57,7 +46,7 @@ class Detection:
 
 @dataclass
 class DetectionResult:
-    """单帧检测结果"""
+    """Detection results for a single frame."""
     detections: list[Detection]
     inference_time_ms: float
     frame_shape: tuple[int, int]  # (height, width)
@@ -68,22 +57,21 @@ class DetectionResult:
 
     @property
     def fps(self) -> float:
-        """纯推理 FPS (不含取流和后处理时间)"""
+        """Pure inference FPS (excludes capture and post-processing)."""
         if self.inference_time_ms <= 0:
             return 0.0
         return 1000.0 / self.inference_time_ms
 
     def filter_by_class(self, class_ids: list[int]) -> list[Detection]:
-        """按类别过滤检测结果"""
         return [d for d in self.detections if d.class_id in class_ids]
 
     def filter_by_confidence(self, threshold: float) -> list[Detection]:
-        """按置信度过滤检测结果"""
         return [d for d in self.detections if d.confidence >= threshold]
 
 
 class OpenVINODetector:
-    """OpenVINO YOLO 目标检测器"""
+    """YOLO detector supporting multiple backends (OpenVINO / CUDA / TensorRT).
+    支持多后端的 YOLO 目标检测器"""
 
     def __init__(
         self,
@@ -97,27 +85,26 @@ class OpenVINODetector:
         self.device = device if device is not None else MODEL.inference_device
         self.conf_threshold = conf_threshold if conf_threshold is not None else MODEL.conf_threshold
         self.iou_threshold = iou_threshold if iou_threshold is not None else MODEL.iou_threshold
-        self.classes = classes  # None = 检测所有类别, list = 仅检测指定类别
+        # None = detect all classes, list = only specified classes
+        # None = 检测所有类别, list = 仅检测指定类别
+        self.classes = classes
 
         self.model = None
         self._is_loaded = False
 
     def load(self) -> bool:
-        """
-        加载模型 (H-02: 支持多后端)
-
-        Returns:
-            True 如果加载成功
-        """
-        # L-14: 检查后端依赖是否安装
+        """Load the model and verify the inference device."""
+        # Check backend dependencies before loading
+        # 加载前检查后端依赖是否安装
         if not self._check_backend_dependencies():
             return False
 
         from ultralytics import YOLO
 
         if not self.model_path.exists():
-            logger.error(f"模型文件不存在: {self.model_path}")
-            # BUG-13 修复: 根据后端提供正确的获取模型提示
+            logger.error(t("model_not_found"))
+            # Provide guidance based on whether export is needed
+            # 根据是否需要导出提供提示
             if MODEL.needs_export:
                 logger.error("请先运行模型导出: python export_model.py")
                 logger.error("  或下载预导出模型: python download_model.py")
@@ -131,33 +118,34 @@ class OpenVINODetector:
 
         self.model = YOLO(str(self.model_path))
 
-        # 验证设备可用性
+        # Verify device availability with a dummy inference
+        # 用空推理验证设备可用性
         try:
-            # 尝试在目标设备上进行一次空推理, 验证设备可用
             dummy = np.zeros((MODEL.imgsz, MODEL.imgsz, 3), dtype=np.uint8)
             self.model.predict(dummy, device=self.device, verbose=False)
-            logger.info("模型加载成功, 设备验证通过")
+            logger.info(t("model_loaded"))
         except Exception as e:
-            logger.warning(f"设备 {self.device} 验证失败: {e}")
-            # H-02: 根据后端选择回退设备
+            logger.warning(t("device_verify_fail", device=self.device, error=e))
+            # Select fallback device based on current backend
+            # 根据当前后端选择回退设备
             fallback = self._get_fallback_device()
             if fallback is None:
-                logger.error("无可用的回退设备")
+                logger.error(t("no_fallback"))
                 return False
-            logger.warning(f"回退到 {fallback}")
+            logger.warning(t("device_fallback", device=fallback))
             self.device = fallback
             try:
                 self.model.predict(dummy, device=self.device, verbose=False)
-                logger.info(f"已回退到 {fallback}")
+                logger.info(t("device_fallback_ok", device=fallback))
             except Exception as e2:
-                logger.error(f"回退设备 {fallback} 验证也失败: {e2}")
+                logger.error(t("device_fallback_fail", device=fallback, error=e2))
                 return False
 
         self._is_loaded = True
         return True
 
     def _get_fallback_device(self) -> str:
-        """根据当前后端选择回退设备"""
+        """Pick a fallback device based on the current backend."""
         if MODEL.backend == "openvino":
             return "intel:cpu"
         elif MODEL.backend in ("cuda", "tensorrt"):
@@ -166,12 +154,12 @@ class OpenVINODetector:
             return "cpu"
 
     def _check_backend_dependencies(self) -> bool:
-        """检查当前后端所需的依赖是否已安装 (L-14)"""
+        """Check that required dependencies for the current backend are installed."""
         if MODEL.backend in ("cuda", "tensorrt"):
             try:
                 import torch
                 if not torch.cuda.is_available():
-                    logger.error(f"CUDA 不可用! 当前后端: {MODEL.backend}")
+                    logger.error(t("cuda_unavailable", backend=MODEL.backend))
                     logger.error("请确认:")
                     logger.error("  1. 已安装 NVIDIA 显卡驱动 (nvidia-smi 可用)")
                     logger.error("  2. 已安装 CUDA 版 PyTorch (非 CPU 版)")
@@ -179,7 +167,7 @@ class OpenVINODetector:
                     logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'openvino'")
                     return False
             except ImportError:
-                logger.error("PyTorch 未安装! CUDA/TensorRT 后端需要 PyTorch")
+                logger.error(t("torch_not_installed"))
                 logger.error("  运行: pip install -r requirements-optional.txt")
                 logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'openvino'")
                 return False
@@ -188,7 +176,7 @@ class OpenVINODetector:
                 try:
                     import tensorrt  # noqa: F401
                 except ImportError:
-                    logger.error("TensorRT 未安装! TensorRT 后端需要 TensorRT 运行库")
+                    logger.error(t("tensorrt_not_installed"))
                     logger.error("  请安装与 CUDA 版本对应的 TensorRT")
                     logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'cuda'")
                     return False
@@ -197,30 +185,22 @@ class OpenVINODetector:
             try:
                 import openvino  # noqa: F401
             except ImportError:
-                logger.error("OpenVINO 未安装! OpenVINO 后端需要 openvino 包")
+                logger.error(t("openvino_not_installed"))
                 logger.error("  运行: pip install openvino")
                 return False
 
         return True
 
     def detect(self, frame: np.ndarray) -> DetectionResult:
-        """
-        对单帧图像进行目标检测
-
-        Args:
-            frame: BGR 格式图像 (OpenCV 默认格式)
-
-        Returns:
-            DetectionResult 包含所有检测结果和推理耗时
-        """
+        """Run detection on a single BGR frame."""
         if not self._is_loaded:
-            logger.error("模型未加载, 请先调用 load()")
+            logger.error(t("model_not_loaded"))
             return DetectionResult([], 0.0, frame.shape[:2])
 
-        # 执行推理
         start_time = time.perf_counter()
 
-        # BUG-10 修复: 捕获推理异常, 避免单帧失败导致程序崩溃
+        # Catch inference errors so a single frame failure doesn't crash
+        # 捕获推理异常, 避免单帧失败导致程序崩溃
         try:
             predict_kwargs = {
                 "device": self.device,
@@ -229,18 +209,18 @@ class OpenVINODetector:
                 "imgsz": MODEL.imgsz,
                 "verbose": False,
             }
-            # 类别过滤: 仅在指定 classes 时传入
+            # Only pass classes filter when specified
+            # 仅在指定 classes 时传入类别过滤
             if self.classes is not None:
                 predict_kwargs["classes"] = self.classes
 
             results = self.model.predict(frame, **predict_kwargs)
         except Exception as e:
-            logger.error(f"推理失败: {e}")
+            logger.error(t("infer_failed", error=e))
             return DetectionResult([], 0.0, frame.shape[:2])
 
         inference_ms = (time.perf_counter() - start_time) * 1000
 
-        # 解析结果
         detections = self._parse_results(results[0], frame.shape[:2])
 
         return DetectionResult(
@@ -250,25 +230,18 @@ class OpenVINODetector:
         )
 
     def detect_batch(self, frames: list[np.ndarray]) -> list[DetectionResult]:
-        """
-        批量检测多帧 (利用 OpenVINO 批量推理优化)
-
-        Args:
-            frames: BGR 图像帧列表
-
-        Returns:
-            检测结果列表 (与输入帧一一对应)
-        """
+        """Run batch detection on multiple BGR frames."""
         if not frames:
             return []
 
         if not self._is_loaded:
-            logger.error("模型未加载, 请先调用 load()")
+            logger.error(t("model_not_loaded"))
             return [DetectionResult([], 0.0, f.shape[:2]) for f in frames]
 
         start_time = time.perf_counter()
 
-        # BUG-10 修复: 批量推理也添加异常捕获
+        # Batch inference also wraps in try/except
+        # 批量推理同样添加异常捕获
         try:
             predict_kwargs = {
                 "device": self.device,
@@ -282,7 +255,7 @@ class OpenVINODetector:
 
             results = self.model.predict(frames, **predict_kwargs)
         except Exception as e:
-            logger.error(f"批量推理失败: {e}")
+            logger.error(t("infer_batch_failed", error=e))
             return [DetectionResult([], 0.0, f.shape[:2]) for f in frames]
 
         total_ms = (time.perf_counter() - start_time) * 1000
@@ -298,7 +271,7 @@ class OpenVINODetector:
         ]
 
     def _parse_results(self, result, frame_shape: tuple[int, int]) -> list[Detection]:
-        """解析 Ultralytics 推理结果为 Detection 列表"""
+        """Parse Ultralytics results into a list of Detection objects."""
         detections = []
 
         if result.boxes is None:
@@ -325,22 +298,17 @@ class OpenVINODetector:
         return detections
 
     def warmup(self, iterations: int = 3):
-        """
-        预热推理引擎: 跑几轮空推理, 让 OpenVINO 完成内核编译和缓存
-
-        Args:
-            iterations: 预热轮数
-        """
+        """Warm up the inference engine with dummy runs."""
         if not self._is_loaded:
             return
 
-        logger.info(f"推理引擎预热中 ({iterations} 轮)...")
+        logger.info(t("model_warmup", iterations=iterations))
         dummy = np.zeros((MODEL.imgsz, MODEL.imgsz, 3), dtype=np.uint8)
 
         for i in range(iterations):
             self.model.predict(dummy, device=self.device, verbose=False)
 
-        logger.info("预热完成, 推理引擎就绪")
+        logger.info(t("model_warmup_done"))
 
     @property
     def is_loaded(self) -> bool:

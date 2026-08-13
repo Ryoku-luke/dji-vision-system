@@ -1,20 +1,9 @@
 """
-DJI 运动相机视觉识别系统 - 主程序
-=====================================
-Intel Core Ultra 7 155H + OpenVINO + YOLO
+DJI Action Camera Vision System - main entry point.
+DJI 运动相机视觉识别系统主程序 (OpenVINO / CUDA + YOLO).
 
-启动流程:
-  1. 加载 OpenVINO 模型
-  2. 打开 UVC 摄像头
-  3. 循环: 取流 -> 推理 -> 可视化 -> 显示
-  4. 按 q 退出, 按 s 截图, 按 r 重置 FPS
-
-用法:
-    python main.py                           # 使用 config.py 默认配置
-    python main.py --no-display              # 不显示窗口 (仅推理, 用于性能测试)
-    python main.py --save                    # 保存输出视频
-    python main.py --device intel:cpu        # 指定推理设备
-    python main.py --confidence 0.7          # 调整置信度阈值
+Flow: load model -> open camera -> loop (capture -> infer -> draw -> show).
+按 q 退出, s 截图, r 重置 FPS.
 """
 
 import sys
@@ -26,17 +15,20 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# 添加项目根目录到路径
+# Add project root to path / 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
 
+import config
 from config import CAMERA, MODEL, DISPLAY, CLASSES
 from camera_capture import CameraCapture
 from detector import OpenVINODetector, DetectionResult
 from visualizer import Visualizer, VideoWriter
+from messages import t
 
-# ============================================================
-# 日志配置
-# ============================================================
+# Backend display names / 后端显示名
+_BACKEND_NAMES = {"openvino": "OpenVINO", "cuda": "CUDA", "tensorrt": "TensorRT"}
+
+# Logging setup / 日志配置
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -46,7 +38,7 @@ logger = logging.getLogger("DJI-Vision")
 
 
 class VisionSystem:
-    """视觉识别系统主控制器"""
+    """Main controller for the vision system / 视觉识别系统主控制器."""
 
     def __init__(
         self,
@@ -81,17 +73,15 @@ class VisionSystem:
         self._start_time = None
 
     def initialize(self) -> bool:
-        """初始化所有组件"""
+        """Initialize all components / 初始化所有组件."""
         logger.info("=" * 60)
-        logger.info("  DJI 运动相机视觉识别系统")
-        # BUG-14 修复: 使用字典映射替代硬编码 if-else, 避免未知后端显示错误
-        backend_names = {"openvino": "OpenVINO", "cuda": "CUDA", "tensorrt": "TensorRT"}
-        backend_display = backend_names.get(MODEL.backend, MODEL.backend.upper())
+        logger.info(f"  {t('system_title')}")
+        backend_display = _BACKEND_NAMES.get(MODEL.backend, MODEL.backend.upper())
         logger.info(f"  后端: {MODEL.backend.upper()} | YOLO + {backend_display}")
         logger.info("=" * 60)
 
-        # 1. 加载推理模型
-        logger.info("\n[1/3] 加载推理模型...")
+        # 1. Load inference model / 加载推理模型
+        logger.info(f"\n[1/3] {t('init_model')}...")
         self.detector = OpenVINODetector(
             device=self.device,
             conf_threshold=self.confidence,
@@ -102,40 +92,39 @@ class VisionSystem:
             return False
         self.detector.warmup(iterations=3)
 
-        # 2. 打开摄像头或视频文件
-        logger.info("\n[2/3] 打开视频源...")
+        # 2. Open camera or video file / 打开摄像头或视频文件
+        logger.info(f"\n[2/3] {t('init_camera')}...")
         self.camera = CameraCapture(source=self.input_source)
         if not self.camera.open():
             return False
-        if not self.camera._is_file:
+        if not self.camera.is_file:
             self.camera.warmup(frames=5)
 
-        # 3. 初始化视频写入器和检测日志 (可选)
+        # 3. Init video writer and detection log (optional) / 初始化视频写入器和检测日志
         if self.save_output:
-            logger.info("\n[3/3] 初始化视频输出...")
+            logger.info(f"\n[3/3] {t('init_output')}...")
             DISPLAY.output_path.parent.mkdir(parents=True, exist_ok=True)
             self.video_writer = VideoWriter(
                 output_path=DISPLAY.output_path,
                 fps=DISPLAY.output_fps,
             )
-            # BUG-09 修复: 使用摄像头实际分辨率
+            # Use actual camera resolution / 使用摄像头实际分辨率
             actual_width = self.camera.width
             actual_height = self.camera.height
             if not self.video_writer.open((actual_width, actual_height)):
-                logger.warning("视频输出初始化失败, 将忽略保存功能")
+                logger.warning(t("video_out_skip"))
                 self.video_writer = None
 
         if self.log_detections:
             self._detection_logger = DetectionLogger(DISPLAY.log_path)
             if not self._detection_logger.open():
-                logger.warning("检测日志初始化失败, 将忽略日志记录")
+                logger.warning(t("log_init_skip"))
                 self._detection_logger = None
 
-        logger.info("\n系统初始化完成!")
+        logger.info(f"\n{t('init_done')}!")
         logger.info(f"  模型: {MODEL.model_name} ({'INT8' if MODEL.int8 else 'FP16' if MODEL.half else 'FP32'})")
         logger.info(f"  设备: {self.detector.device}")
-        # BUG-09 修复: 显示实际分辨率而非配置分辨率
-        source_type = "视频文件" if self.camera._is_file else "UVC 摄像头"
+        source_type = "视频文件" if self.camera.is_file else "UVC 摄像头"
         logger.info(f"  视频源: {source_type} ({self.camera.width}x{self.camera.height} @ {self.camera.fps}fps)")
         logger.info(f"  置信度: {self.detector.conf_threshold} | IoU: {self.detector.iou_threshold}")
         if self.classes is not None:
@@ -150,9 +139,9 @@ class VisionSystem:
         return True
 
     def run(self):
-        """主循环"""
+        """Main loop / 主循环."""
         if not self.detector or not self.camera:
-            logger.error("系统未初始化, 请先调用 initialize()")
+            logger.error(t("not_initialized"))
             return
 
         self._running = True
@@ -162,81 +151,82 @@ class VisionSystem:
 
         try:
             while self._running:
-                # --- 1. 取流 ---
+                # 1. Capture frame / 取流
                 frame = self.camera.read()
                 if frame is None:
                     _consecutive_drops += 1
-                    # 视频文件结束: 自动退出
-                    if self.camera._is_file:
-                        logger.info("视频文件播放完毕")
+                    # End of video file: exit / 视频文件结束: 自动退出
+                    if self.camera.is_file:
+                        logger.info(t("video_finished"))
                         break
-                    # 摄像头连续丢帧超过 30 次 (约 1 秒): 可能断开
+                    # Camera dropped >30 frames (~1s): likely disconnected / 摄像头连续丢帧超过 30 次: 可能断开
                     if _consecutive_drops > 30:
-                        logger.error("摄像头连续丢帧, 可能已断开连接")
+                        logger.error(t("camera_dropped"))
                         break
-                    logger.warning(f"丢帧 ({_consecutive_drops}), 等待下一帧...")
+                    logger.warning(t("frame_drop", count=_consecutive_drops))
                     time.sleep(0.01)
                     continue
                 _consecutive_drops = 0
 
-                # --- 2. 推理 ---
+                # 2. Inference / 推理
                 result = self.detector.detect(frame)
 
-                # --- 3. 可视化 ---
+                # 3. Visualization / 可视化
                 if self.show_display or self.save_output:
-                    # 获取系统资源信息
                     extra_info = self._get_system_info()
-
                     output_frame = self.visualizer.draw(
                         frame, result, extra_info=extra_info, mirror=self.mirror
                     )
                 else:
                     output_frame = frame
 
-                # --- 3.5 检测日志 ---
+                # 3.5 Detection log / 检测日志
                 if self._detection_logger:
                     self._detection_logger.log(self._frame_count, result)
 
-                # --- 4. 输出 ---
+                # 4. Output / 输出
                 if self.show_display:
                     cv2.imshow(DISPLAY.window_name, output_frame)
 
                 if self.video_writer:
                     self.video_writer.write(output_frame)
 
-                # --- 5. 键盘交互 ---
+                # 5. Keyboard interaction / 键盘交互
                 if self.show_display:
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord("q"):
-                        logger.info("用户退出")
+                        logger.info(t("user_quit"))
                         break
                     elif key == ord("s"):
                         self._save_screenshot(output_frame)
                     elif key == ord("r"):
                         self.visualizer.reset_fps()
-                        logger.info("FPS 计数器已重置")
+                        logger.info(t("fps_reset"))
 
                 self._frame_count += 1
 
-                # 每 100 帧打印一次统计
+                # Print stats every 100 frames / 每 100 帧打印一次统计
                 if self._frame_count % 100 == 0:
                     elapsed = time.perf_counter() - self._start_time
                     avg_fps = self._frame_count / elapsed
                     logger.info(
-                        f"已处理 {self._frame_count} 帧, "
-                        f"平均 {avg_fps:.1f} FPS, "
-                        f"推理 {result.inference_time_ms:.1f} ms/帧, "
-                        f"检测到 {result.num_objects} 个目标"
+                        t(
+                            "stats_line",
+                            count=self._frame_count,
+                            fps=f"{avg_fps:.1f}",
+                            ms=f"{result.inference_time_ms:.1f}",
+                            objects=result.num_objects,
+                        )
                     )
 
         except KeyboardInterrupt:
-            logger.info("\n收到中断信号, 正在退出...")
+            logger.info(f"\n{t('interrupted')}...")
 
         finally:
             self.shutdown()
 
     def _get_system_info(self) -> dict:
-        """获取系统资源使用信息 (用于显示)"""
+        """Get system resource usage (for display) / 获取系统资源使用信息."""
         try:
             import psutil
             cpu = psutil.cpu_percent(interval=None)
@@ -246,21 +236,28 @@ class VisionSystem:
             return {}
 
     def _save_screenshot(self, frame: np.ndarray):
-        """保存截图"""
+        """Save a screenshot / 保存截图."""
         screenshot_dir = Path("output/screenshots")
         screenshot_dir.mkdir(parents=True, exist_ok=True)
         filename = screenshot_dir / f"screenshot_{int(time.time())}.jpg"
         cv2.imwrite(str(filename), frame)
-        logger.info(f"截图已保存: {filename}")
+        logger.info(t("screenshot_saved", path=filename))
 
     def shutdown(self):
-        """关闭所有资源"""
-        logger.info("\n正在关闭系统...")
+        """Release all resources / 关闭所有资源."""
+        logger.info(f"\n{t('system_closing')}...")
 
         if self._frame_count > 0 and self._start_time:
             elapsed = time.perf_counter() - self._start_time
             avg_fps = self._frame_count / elapsed
-            logger.info(f"总计: {self._frame_count} 帧, {elapsed:.1f}s, 平均 {avg_fps:.1f} FPS")
+            logger.info(
+                t(
+                    "total_stats",
+                    count=self._frame_count,
+                    elapsed=f"{elapsed:.1f}",
+                    fps=f"{avg_fps:.1f}",
+                )
+            )
 
         if self.camera:
             self.camera.close()
@@ -275,15 +272,15 @@ class VisionSystem:
             cv2.destroyAllWindows()
 
         self._running = False
-        logger.info("系统已关闭")
+        logger.info(t("system_ready"))
 
     def stop(self):
-        """外部调用停止"""
+        """Stop from outside / 外部调用停止."""
         self._running = False
 
 
 class DetectionLogger:
-    """检测结果 CSV 日志记录器"""
+    """CSV logger for detections / 检测结果 CSV 日志记录器."""
 
     def __init__(self, log_path: Path):
         self.log_path = Path(log_path)
@@ -291,7 +288,7 @@ class DetectionLogger:
         self._writer = None
 
     def open(self) -> bool:
-        """打开日志文件, 写入 CSV 表头"""
+        """Open log file and write CSV header / 打开日志文件, 写入 CSV 表头."""
         try:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             import csv
@@ -301,14 +298,14 @@ class DetectionLogger:
                 "timestamp", "frame", "class_id", "class_name",
                 "confidence", "x1", "y1", "x2", "y2",
             ])
-            logger.info(f"检测日志已创建: {self.log_path}")
+            logger.info(t("log_created", path=self.log_path))
             return True
         except Exception as e:
-            logger.error(f"无法创建检测日志: {e}")
+            logger.error(t("log_create_fail", error=e))
             return False
 
     def log(self, frame_number: int, result: DetectionResult):
-        """记录一帧的检测结果"""
+        """Log one frame of detections / 记录一帧的检测结果."""
         if self._writer is None:
             return
         timestamp = time.strftime("%H:%M:%S")
@@ -321,24 +318,16 @@ class DetectionLogger:
             ])
 
     def close(self):
-        """关闭日志文件"""
+        """Close the log file / 关闭日志文件."""
         if self._file is not None:
             self._file.close()
             self._file = None
             self._writer = None
-            logger.info("检测日志已关闭")
+            logger.info(t("log_closed"))
 
 
 def parse_classes(class_str: str) -> list[int]:
-    """
-    解析类别过滤参数
-
-    Args:
-        class_str: 逗号分隔的类别名称或 ID (如 "person,car,0,truck")
-
-    Returns:
-        类别 ID 列表
-    """
+    """Parse class filter argument / 解析类别过滤参数 (e.g. "person,car,0")."""
     if not class_str:
         return None
 
@@ -352,78 +341,86 @@ def parse_classes(class_str: str) -> list[int]:
             if 0 <= cls_id < len(CLASSES):
                 result.append(cls_id)
             else:
-                logger.warning(f"类别 ID {cls_id} 超出范围 (0-{len(CLASSES)-1}), 已忽略")
+                logger.warning(t("class_id_oor", id=cls_id, max=len(CLASSES) - 1))
         else:
-            # 按名称查找
+            # Look up by name / 按名称查找
             if item in CLASSES:
                 result.append(CLASSES.index(item))
             else:
-                logger.warning(f"未知类别名称: {item}, 已忽略")
+                logger.warning(t("class_unknown", name=item))
 
     return result if result else None
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="DJI 运动相机视觉识别系统",
+        description="DJI Action Camera Vision System / DJI 运动相机视觉识别系统",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-示例:
-  python main.py                           # 默认配置启动 (UVC 摄像头)
-  python main.py --device intel:cpu        # 使用 CPU 推理
-  python main.py --confidence 0.7          # 提高置信度阈值
-  python main.py --no-display --save       # 无显示, 保存视频
-  python main.py --list-cameras            # 列出可用摄像头
-  python main.py --input video.mp4         # 从视频文件推理
-  python main.py --classes person,car      # 仅检测行人和车辆
-  python main.py --flip                    # 水平镜像画面
-  python main.py --log-detections          # 记录检测结果到 CSV
+Examples / 示例:
+  python main.py                           # Default config (UVC camera) / 默认配置启动
+  python main.py --device intel:cpu        # Use CPU inference / 使用 CPU 推理
+  python main.py --confidence 0.7          # Raise confidence threshold / 提高置信度阈值
+  python main.py --no-display --save        # No display, save video / 无显示, 保存视频
+  python main.py --list-cameras            # List available cameras / 列出可用摄像头
+  python main.py --input video.mp4         # Infer from video file / 从视频文件推理
+  python main.py --classes person,car      # Detect persons and cars only / 仅检测行人和车辆
+  python main.py --flip                    # Horizontal mirror / 水平镜像画面
+  python main.py --log-detections          # Log detections to CSV / 记录检测结果到 CSV
+  python main.py --lang en                 # English log messages / 英文日志
         """,
     )
     parser.add_argument("--device", type=str, default=None,
-                        help="推理设备 (OpenVINO: intel:gpu/intel:cpu | CUDA: 0/cpu)")
+                        help="Inference device / 推理设备 (OpenVINO: intel:gpu/intel:cpu | CUDA: 0/cpu)")
     parser.add_argument("--confidence", type=float, default=None,
-                        help="置信度阈值 (默认: 0.5)")
+                        help="Confidence threshold / 置信度阈值 (default: 0.5)")
     parser.add_argument("--iou", type=float, default=None,
-                        help="NMS IoU 阈值 (默认: 0.5)")
+                        help="NMS IoU threshold / NMS IoU 阈值 (default: 0.5)")
     parser.add_argument("--classes", type=str, default=None,
-                        help="仅检测指定类别, 逗号分隔 (如 person,car,0)")
+                        help="Filter classes, comma-separated / 仅检测指定类别, 逗号分隔 (e.g. person,car,0)")
     parser.add_argument("--input", type=str, default=None,
-                        help="视频文件路径 (指定后从文件读取, 而非摄像头)")
+                        help="Video file path / 视频文件路径 (read from file instead of camera)")
     parser.add_argument("--no-display", action="store_true",
-                        help="不显示实时画面窗口")
+                        help="Disable live display window / 不显示实时画面窗口")
     parser.add_argument("--save", action="store_true",
-                        help="保存输出视频到 output/result.mp4")
+                        help="Save output video to output/result.mp4 / 保存输出视频")
     parser.add_argument("--flip", action="store_true",
-                        help="画面水平镜像 (相机倒装时使用)")
+                        help="Horizontal mirror / 画面水平镜像 (相机倒装时使用)")
     parser.add_argument("--log-detections", action="store_true",
-                        help="记录检测结果到 CSV 文件 (output/detections.csv)")
+                        help="Log detections to CSV / 记录检测结果到 CSV (output/detections.csv)")
     parser.add_argument("--list-cameras", action="store_true",
-                        help="列出可用的摄像头设备")
+                        help="List available cameras / 列出可用的摄像头设备")
+    parser.add_argument("--lang", type=str, default=None, choices=["zh", "en"],
+                        help="Language for log messages (zh/en) / 日志语言 (zh/en)")
     args = parser.parse_args()
 
-    # 列出摄像头
+    # Apply language override / 应用语言设置
+    if args.lang:
+        config.LANGUAGE = args.lang
+
+    # List cameras / 列出摄像头
     if args.list_cameras:
         cam = CameraCapture()
         cam.list_devices()
         return
 
-    # 检查模型是否存在
+    # Check model exists / 检查模型是否存在
     if not MODEL.exported_path.exists():
         logger.error(f"未找到模型: {MODEL.exported_path}")
-        # BUG-13 修复: 根据后端提供正确的获取模型提示
         if MODEL.needs_export:
+            # OpenVINO / TensorRT: export or download pre-exported model / 导出或下载预导出模型
             logger.error("请先运行模型导出: python export_model.py")
             logger.error("  或下载预导出模型: python download_model.py")
         else:
-            logger.error("请先下载模型: python download_model.py")
-            logger.error("  或运行: python export_model.py --model yolo26s.pt")
+            # CUDA: download_model.py only handles OpenVINO; use export_model.py for the .pt model
+            # CUDA: download_model.py 仅支持 OpenVINO, 用 export_model.py 下载 .pt 模型
+            logger.error("请运行: python export_model.py --model yolo26s.pt 以下载 .pt 模型")
         sys.exit(1)
 
-    # 解析类别过滤
+    # Parse class filter / 解析类别过滤
     class_ids = parse_classes(args.classes) if args.classes else None
 
-    # 启动系统
+    # Start system / 启动系统
     system = VisionSystem(
         device=args.device,
         confidence=args.confidence,
@@ -437,7 +434,7 @@ def main():
     )
 
     if not system.initialize():
-        logger.error("系统初始化失败, 请检查错误信息")
+        logger.error(t("init_failed"))
         sys.exit(1)
 
     system.run()

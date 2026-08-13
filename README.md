@@ -1,3 +1,5 @@
+[中文](README.md) | [English](README_EN.md)
+
 # DJI 运动相机视觉识别系统
 
 > 基于 DJI Osmo Action 运动相机 + OpenVINO + YOLO 的跨平台实时目标检测系统
