@@ -132,7 +132,9 @@ class CameraCapture:
 
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.fps = int(self.cap.get(cv2.CAP_PROP_FPS)) or 30
+        # BUG-12 修复: 使用显式 > 0 判断替代 or, 避免 falsy 语义不一致
+        file_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        self.fps = file_fps if file_fps > 0 else 30
 
         frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         logger.info(f"视频已打开: {self.width}x{self.height} @ {self.fps}fps, 共 {frame_count} 帧")

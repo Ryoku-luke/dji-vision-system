@@ -113,7 +113,13 @@ class OpenVINODetector:
 
         if not self.model_path.exists():
             logger.error(f"模型文件不存在: {self.model_path}")
-            logger.error("请先运行: python export_model.py")
+            # BUG-13 修复: 根据后端提供正确的获取模型提示
+            if MODEL.needs_export:
+                logger.error("请先运行模型导出: python export_model.py")
+                logger.error("  或下载预导出模型: python download_model.py")
+            else:
+                logger.error("请先下载模型: python download_model.py")
+                logger.error("  或运行: python export_model.py --model yolo26s.pt")
             return False
 
         logger.info(f"加载模型: {self.model_path}")

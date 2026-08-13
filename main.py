@@ -84,7 +84,10 @@ class VisionSystem:
         """初始化所有组件"""
         logger.info("=" * 60)
         logger.info("  DJI 运动相机视觉识别系统")
-        logger.info(f"  后端: {MODEL.backend.upper()} | YOLO + {'OpenVINO' if MODEL.backend == 'openvino' else 'CUDA' if MODEL.backend == 'cuda' else 'TensorRT'}")
+        # BUG-14 修复: 使用字典映射替代硬编码 if-else, 避免未知后端显示错误
+        backend_names = {"openvino": "OpenVINO", "cuda": "CUDA", "tensorrt": "TensorRT"}
+        backend_display = backend_names.get(MODEL.backend, MODEL.backend.upper())
+        logger.info(f"  后端: {MODEL.backend.upper()} | YOLO + {backend_display}")
         logger.info("=" * 60)
 
         # 1. 加载推理模型
@@ -407,9 +410,14 @@ def main():
 
     # 检查模型是否存在
     if not MODEL.exported_path.exists():
-        logger.error(f"未找到导出的模型: {MODEL.exported_path}")
-        logger.error("请先运行模型导出: python export_model.py")
-        logger.error(f"  或指定其他模型: python export_model.py --model yolo26n.pt")
+        logger.error(f"未找到模型: {MODEL.exported_path}")
+        # BUG-13 修复: 根据后端提供正确的获取模型提示
+        if MODEL.needs_export:
+            logger.error("请先运行模型导出: python export_model.py")
+            logger.error("  或下载预导出模型: python download_model.py")
+        else:
+            logger.error("请先下载模型: python download_model.py")
+            logger.error("  或运行: python export_model.py --model yolo26s.pt")
         sys.exit(1)
 
     # 解析类别过滤

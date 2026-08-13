@@ -1,10 +1,17 @@
 # DJI 运动相机视觉识别系统
 
-基于 **DJI Osmo Action 运动相机** + **OpenVINO + YOLO** 的跨平台实时目标检测系统。
+> 基于 DJI Osmo Action 运动相机 + OpenVINO + YOLO 的跨平台实时目标检测系统
 
-利用 DJI 运动相机的 UVC 网络摄像头模式采集视频，通过 OpenVINO INT8 加速推理（支持 Intel Arc GPU / NVIDIA CUDA / TensorRT 多后端），实现 80 类目标的实时检测，推理速度最高可达 **97 FPS**（yolo26s INT8, Intel Arc GPU）。
+利用 DJI 运动相机的 UVC 网络摄像头模式采集视频，通过 OpenVINO INT8 加速推理（支持 Intel Arc GPU / NVIDIA CUDA / TensorRT 三种后端），实现 COCO 80 类目标的实时检测，推理速度最高可达 **97 FPS**（yolo26s INT8, Intel Arc GPU）。
 
-支持 **Windows / Linux / macOS** 三大平台，内置 101 个自动化单元测试和 GitHub Actions CI/CD 流水线。
+**核心特性**:
+
+- **跨平台**: 自动适配 Windows (MSMF) / Linux (V4L2) / macOS (AVFoundation) 摄像头后端
+- **多后端**: OpenVINO (Intel) / CUDA (NVIDIA) / TensorRT (NVIDIA) 三种推理后端可切换
+- **高性能**: INT8 量化 + Arc GPU 加速, 最高 97 FPS 实时检测
+- **易部署**: 支持预导出模型一键下载, 无需手动校准
+- **高质量**: 101 个 pytest 单元测试 + GitHub Actions CI/CD 流水线
+- **多功能**: 视频文件输入、类别过滤、检测日志、画面镜像、视频保存
 
 ---
 
@@ -473,6 +480,10 @@ python main.py --input video.mp4 --classes person,car --flip --save --log-detect
 | `export_model.py` | `--model` | 模型名称 (如 `yolo26s.pt`, `yolo26m.pt`) |
 | `export_model.py` | `--device` | 导出时使用的设备 (`cpu` 或 `0`) |
 | `export_model.py` | `--benchmark` | 导出后运行基准测试 |
+| `download_model.py` | `--model` | 模型名称 (如 `yolo26s`, `yolo26m`, 默认: yolo26s) |
+| `download_model.py` | `--list` | 列出可用模型及其大小和推理速度 |
+| `download_model.py` | `--force` | 覆盖已存在的模型文件 |
+| `download_model.py` | `--version` | 指定 Release 版本号 (默认: v1.0.0) |
 
 ---
 
@@ -493,12 +504,13 @@ dji-vision-system/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml         # GitHub Actions CI/CD (H-04, 语法检查/测试/代码质量)
-├── tests/                 # 自动化测试 (H-03, 65 个 pytest 用例)
-│   ├── conftest.py        # 测试 fixtures
-│   ├── test_config.py     # 配置模块测试
-│   ├── test_detector.py   # 检测器测试 (含 BUG-01 回归)
-│   ├── test_camera_capture.py  # 摄像头测试 (含 BUG-08 回归)
-│   └── test_main.py       # 主程序工具函数测试
+├── tests/                 # 自动化测试 (H-03/H-09, 101 个 pytest 用例)
+│   ├── conftest.py        # 测试 fixtures (含 cv2 桩模块)
+│   ├── test_config.py     # 配置模块测试 (16 个)
+│   ├── test_detector.py   # 检测器测试 (19 个, 含 BUG-01 回归)
+│   ├── test_camera_capture.py  # 摄像头测试 (15 个, 含 BUG-08 回归)
+│   ├── test_main.py       # 主程序工具函数测试 (15 个)
+│   └── test_backend.py    # 跨平台后端 & 多后端推理测试 (36 个, H-09)
 ├── models/                # 模型文件目录 (自动创建, 已 gitignore)
 │   ├── yolo26s.pt         # 原始 PyTorch 模型
 │   └── exported/          # 导出后的模型
@@ -525,7 +537,7 @@ class CameraConfig:
     height: int = 1080           # 采集分辨率高度
     fps: int = 30                # 采集帧率 (UVC 模式下 25 或 30)
     buffer_size: int = 1         # OpenCV 缓冲帧数 (1 = 最低延迟)
-    api_preference: int = 700    # CAP_MSMF (Windows Media Foundation)
+    api_preference: int = 0      # 0 = 自动检测 (Windows:700/Linux:200/macOS:1200)
 ```
 
 ### 模型配置 (`ModelConfig`)
@@ -535,6 +547,8 @@ class CameraConfig:
 class ModelConfig:
     # --- 模型选择 ---
     model_name: str = "yolo26s.pt"       # 可选: yolo26n/s/m/l/x
+    # --- 推理后端 (H-02) ---
+    backend: str = "openvino"            # openvino / cuda / tensorrt
     # --- OpenVINO 导出参数 ---
     export_format: str = "openvino"
     imgsz: int = 640                     # 模型输入尺寸
@@ -693,11 +707,11 @@ python export_model.py --benchmark
 
 | 模型 | INT8 大小 | 推理速度 | 适用场景 |
 |------|----------|---------|---------|
-| yolo26n | ~6 MB | ~170 fps | 速度优先 |
+| yolo26n | ~3 MB | ~170 fps | 速度优先 |
 | yolo26s | ~10 MB | ~97 fps | **推荐** |
-| yolo26m | ~25 MB | ~63 fps | 精度优先 |
-| yolo26l | ~43 MB | ~49 fps | 高精度 |
-| yolo26x | ~68 MB | ~28 fps | 最高精度 |
+| yolo26m | ~26 MB | ~63 fps | 精度优先 |
+| yolo26l | ~44 MB | ~49 fps | 高精度 |
+| yolo26x | ~69 MB | ~28 fps | 最高精度 |
 
 ---
 
@@ -717,7 +731,7 @@ python export_model.py --benchmark
 ### Q: GPU 设备不可用
 
 1. 确认安装了 Intel Arc 显卡驱动
-2. 确认 OpenVINO 版本 >= 2026.1
+2. 确认 OpenVINO 版本 >= 2024.0
 3. 运行 `python -c "from openvino import Core; print(Core().available_devices)"`
 4. 如 GPU 不在列表中, 回退使用 CPU: `python main.py --device intel:cpu`
 
@@ -738,19 +752,20 @@ python export_model.py --benchmark
 
 ## BUG 修复测试报告
 
-> **测试日期**: 2026-08-13 | **提交**: `f36cb8f` (第一次) / 新提交 (第二次) | **通过率**: 100%
+> **测试日期**: 2026-08-13 | **提交**: `f36cb8f` (第一次) / 新提交 (第二次) / 新提交 (第三次) | **通过率**: 100%
 
 ### 测试概览
 
-两次代码审查共发现 **11 个 BUG**（严重 3 / 中等 5 / 轻微 3），涉及 5 个源码文件。所有修复均通过 `py_compile` 语法验证和逻辑分析，代码已推送至 GitHub。
+三次代码审查共发现 **14 个 BUG**（严重 3 / 中等 5 / 轻微 6），涉及 5 个源码文件。所有修复均通过 `py_compile` 语法验证和 101 个 pytest 单元测试，代码已推送至 GitHub。
 
 | 指标 | 数值 |
 |------|------|
-| 发现 BUG 总数 | 11 |
-| 已修复 BUG | 11 |
+| 发现 BUG 总数 | 14 |
+| 已修复 BUG | 14 |
 | 语法检查通过 | 6/6 |
+| 单元测试通过 | 101/101 |
 | 涉及文件数 | 5 |
-| 代码变更 | +127 行 / -38 行 |
+| 代码变更 | +155 行 / -42 行 |
 
 ### BUG 修复总览
 
@@ -767,6 +782,9 @@ python export_model.py --benchmark
 | BUG-09 | **中等** | `main.py` | 系统初始化日志显示配置分辨率而非摄像头实际分辨率 | 从 `camera.width/height` 读取实际值 | PASS |
 | BUG-10 | **严重** | `detector.py` | `detect()` 未捕获推理异常，单帧失败导致程序崩溃 | 添加 try-except 返回空结果 | PASS |
 | BUG-11 | **轻微** | `camera_capture.py` | 某些相机不报告 FPS（返回 0.0），日志显示 "0fps" | 检测 0 值并显示 "N/A" | PASS |
+| BUG-12 | **轻微** | `camera_capture.py` | `_open_file()` 使用 `or` 判断 FPS, 与 BUG-08 修复方式不一致 | 改用显式 `> 0` 判断 | PASS |
+| BUG-13 | **轻微** | `detector.py` / `main.py` | 模型缺失提示始终建议 `export_model.py`, CUDA 后端无需导出 | 根据 `needs_export` 提供差异化提示 | PASS |
+| BUG-14 | **轻微** | `main.py` | 后端名称显示使用 if-else 链, 未知后端错误显示 "TensorRT" | 改用字典映射, 未知后端显示大写名称 | PASS |
 
 ### BUG-01：falsy 判断导致参数被错误覆盖 [严重]
 
@@ -1022,6 +1040,50 @@ python export_model.py --benchmark
 + logger.info(f"摄像头已打开: {actual_w}x{actual_h} @ {fps_display}fps")
 ```
 
+### BUG-12：视频文件 FPS falsy 判断 [轻微]
+
+**问题描述**: `CameraCapture._open_file()` 中使用 `int(self.cap.get(cv2.CAP_PROP_FPS)) or 30` 为视频文件 FPS 提供默认值。虽然对视频文件而言 0 FPS 不合理、回退到 30 是合理行为，但使用 `or` 运算符与 BUG-08 的修复哲学不一致，且语义不够明确。
+
+**代码变更** (`camera_capture.py`):
+
+```diff
+- self.fps = int(self.cap.get(cv2.CAP_PROP_FPS)) or 30
++ # BUG-12 修复: 使用显式 > 0 判断替代 or, 避免 falsy 语义不一致
++ file_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
++ self.fps = file_fps if file_fps > 0 else 30
+```
+
+### BUG-13：模型缺失提示不区分后端 [轻微]
+
+**问题描述**: `OpenVINODetector.load()` 和 `main.py` 中检查模型文件不存在时，始终提示用户运行 `python export_model.py`。但 CUDA 后端直接使用 `.pt` 模型无需导出，应提示用户使用 `download_model.py` 下载模型。
+
+**代码变更** (`detector.py` / `main.py`):
+
+```diff
+- logger.error("请先运行: python export_model.py")
++ # BUG-13 修复: 根据后端提供正确的获取模型提示
++ if MODEL.needs_export:
++     logger.error("请先运行模型导出: python export_model.py")
++     logger.error("  或下载预导出模型: python download_model.py")
++ else:
++     logger.error("请先下载模型: python download_model.py")
++     logger.error("  或运行: python export_model.py --model yolo26s.pt")
+```
+
+### BUG-14：后端名称显示 fallback 错误 [轻微]
+
+**问题描述**: `main.py` 中使用嵌套 if-else 三元表达式显示后端名称：`'OpenVINO' if ... else 'CUDA' if ... else 'TensorRT'`。当 `MODEL.backend` 为未知值时，else 分支错误地显示 "TensorRT"。
+
+**代码变更** (`main.py`):
+
+```diff
+- logger.info(f"  后端: ... | YOLO + {'OpenVINO' if ... else 'CUDA' if ... else 'TensorRT'}")
++ # BUG-14 修复: 使用字典映射替代硬编码 if-else
++ backend_names = {"openvino": "OpenVINO", "cuda": "CUDA", "tensorrt": "TensorRT"}
++ backend_display = backend_names.get(MODEL.backend, MODEL.backend.upper())
++ logger.info(f"  后端: {MODEL.backend.upper()} | YOLO + {backend_display}")
+```
+
 ### 语法验证结果
 
 使用 Python 内置的 `py_compile` 模块对所有修改过的源码文件进行语法检查：
@@ -1052,13 +1114,17 @@ python export_model.py --benchmark
 | BUG-09 (分辨率日志) | **中** | 日志误导，不影响功能 |
 | BUG-10 (推理异常) | **高** | 单帧推理失败导致整个程序崩溃，实时系统中影响严重 |
 | BUG-11 (FPS 为 0) | **低** | 仅影响日志显示，不影响功能 |
+| BUG-12 (视频 FPS falsy) | **低** | 与 BUG-08 同类, 仅影响视频文件 FPS 读取, 语义不明确 |
+| BUG-13 (提示不区分后端) | **低** | CUDA 用户收到错误的导出提示, 不影响功能 |
+| BUG-14 (后端名称 fallback) | **低** | 仅在未知后端时显示错误名称, 当前支持的三种后端不受影响 |
 
 ### 后续建议
 
-1. **集成单元测试框架**: 引入 `pytest` 编写自动化测试用例，覆盖 `OpenVINODetector` 参数传递和 `CameraCapture` 设备回退逻辑
+1. ~~**集成单元测试框架**~~: 已完成 - 101 个 pytest 用例覆盖核心模块、跨平台后端、多后端推理
 2. **端到端集成测试**: 在真实 DJI 相机 + Intel 155H 硬件环境下验证 UVC 采集 → OpenVINO 推理 → 可视化输出完整链路
-3. **CI/CD 流水线**: 在 GitHub Actions 中配置 `py_compile` 语法检查和 `pylint` 代码质量检查，每次提交自动运行
+3. ~~**CI/CD 流水线**~~: 已完成 - GitHub Actions 配置了 py_compile 语法检查、pytest 单元测试、pylint/mypy 代码质量检查
 4. **类型注解强化**: 使用 `mypy` 进行静态类型检查，从类型层面预防 BUG-01 类 falsy 判断问题
+5. **预导出模型上传**: 将 INT8 模型上传到 GitHub Release, 使 `download_model.py` 可直接下载使用
 
 ---
 
@@ -1071,6 +1137,6 @@ python export_model.py --benchmark
 | Ultralytics | 8.4+ | YOLO26 模型管理 |
 | OpenCV | 4.9+ | 跨平台 UVC 采集 (Windows/Linux/macOS) |
 | NumPy | 1.24+ | 数组运算 |
-| pytest | 8.0+ | 单元测试框架 (65 个用例) |
+| pytest | 8.0+ | 单元测试框架 (101 个用例) |
 | PyTorch | 2.0+ | CUDA 后端 (可选, 仅 NVIDIA, 需 CUDA 版安装) |
 | TensorRT | 8.6+ | TensorRT 后端 (可选, 仅 NVIDIA, 不支持 macOS) |
