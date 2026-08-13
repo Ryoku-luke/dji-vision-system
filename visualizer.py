@@ -176,10 +176,12 @@ class Visualizer:
         panel_w = max_width + padding * 2
         panel_h = len(lines) * line_height + padding
 
-        # Semi-transparent background / 半透明背景
-        overlay = frame.copy()
+        # Semi-transparent background (only copy the panel region, not the full frame)
+        # 半透明背景 (仅拷贝面板区域, 避免整帧拷贝)
+        roi = frame[0:panel_h, 0:panel_w]
+        overlay = roi.copy()
         cv2.rectangle(overlay, (0, 0), (panel_w, panel_h), (0, 0, 0), cv2.FILLED)
-        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        cv2.addWeighted(overlay, 0.6, roi, 0.4, 0, roi)
 
         # Draw text / 绘制文字
         for i, line in enumerate(lines):

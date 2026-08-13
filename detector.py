@@ -91,6 +91,7 @@ class OpenVINODetector:
 
         self.model = None
         self._is_loaded = False
+        self._predict_kwargs = None  # Cached kwargs for predict()
 
     def load(self) -> bool:
         """Load the model and verify the inference device."""
@@ -142,6 +143,23 @@ class OpenVINODetector:
                 return False
 
         self._is_loaded = True
+
+        # Cache predict kwargs to avoid rebuilding every frame
+        # 缓存 predict 参数, 避免每帧重建字典
+        self._predict_kwargs = {
+            "device": self.device,
+            "conf": self.conf_threshold,
+            "iou": self.iou_threshold,
+            "imgsz": MODEL.imgsz,
+            "verbose": False,
+        }
+        if self.classes is not None:
+            self._predict_kwargs["classes"] = self.classes
+        # Enable FP16 for CUDA backend (PyTorch runtime inference)
+        # CUDA 后端启用 FP16 (PyTorch 运行时推理)
+        if MODEL.backend == "cuda" and MODEL.half:
+            self._predict_kwargs["half"] = True
+
         return True
 
     def _get_fallback_device(self) -> str:
@@ -202,19 +220,7 @@ class OpenVINODetector:
         # Catch inference errors so a single frame failure doesn't crash
         # 捕获推理异常, 避免单帧失败导致程序崩溃
         try:
-            predict_kwargs = {
-                "device": self.device,
-                "conf": self.conf_threshold,
-                "iou": self.iou_threshold,
-                "imgsz": MODEL.imgsz,
-                "verbose": False,
-            }
-            # Only pass classes filter when specified
-            # 仅在指定 classes 时传入类别过滤
-            if self.classes is not None:
-                predict_kwargs["classes"] = self.classes
-
-            results = self.model.predict(frame, **predict_kwargs)
+            results = self.model.predict(frame, **self._predict_kwargs)
         except Exception as e:
             logger.error(t("infer_failed", error=e))
             return DetectionResult([], 0.0, frame.shape[:2])
@@ -243,17 +249,7 @@ class OpenVINODetector:
         # Batch inference also wraps in try/except
         # 批量推理同样添加异常捕获
         try:
-            predict_kwargs = {
-                "device": self.device,
-                "conf": self.conf_threshold,
-                "iou": self.iou_threshold,
-                "imgsz": MODEL.imgsz,
-                "verbose": False,
-            }
-            if self.classes is not None:
-                predict_kwargs["classes"] = self.classes
-
-            results = self.model.predict(frames, **predict_kwargs)
+            results = self.model.predict(frames, **self._predict_kwargs)
         except Exception as e:
             logger.error(t("infer_batch_failed", error=e))
             return [DetectionResult([], 0.0, f.shape[:2]) for f in frames]
@@ -278,19 +274,25 @@ class OpenVINODetector:
             return detections
 
         boxes = result.boxes
-        for i in range(len(boxes)):
-            xyxy = boxes.xyxy[i].cpu().numpy()
-            conf = float(boxes.conf[i].cpu().numpy())
-            cls_id = int(boxes.cls[i].cpu().numpy())
+        n = len(boxes)
+        if n == 0:
+            return detections
 
+        # Batch GPU->CPU transfer: one call per tensor instead of per-box
+        # 批量 GPU->CPU 传输: 每个 tensor 一次调用, 而非逐检测
+        all_xyxy = boxes.xyxy.cpu().numpy()
+        all_conf = boxes.conf.cpu().numpy()
+        all_cls = boxes.cls.cpu().numpy()
+
+        for i in range(n):
+            cls_id = int(all_cls[i])
             class_name = CLASSES[cls_id] if cls_id < len(CLASSES) else str(cls_id)
-
             detections.append(Detection(
-                x1=float(xyxy[0]),
-                y1=float(xyxy[1]),
-                x2=float(xyxy[2]),
-                y2=float(xyxy[3]),
-                confidence=conf,
+                x1=float(all_xyxy[i][0]),
+                y1=float(all_xyxy[i][1]),
+                x2=float(all_xyxy[i][2]),
+                y2=float(all_xyxy[i][3]),
+                confidence=float(all_conf[i]),
                 class_id=cls_id,
                 class_name=class_name,
             ))

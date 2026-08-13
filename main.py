@@ -71,6 +71,7 @@ class VisionSystem:
         self._running = False
         self._frame_count = 0
         self._start_time = None
+        self._cached_sysinfo = None
 
     def initialize(self) -> bool:
         """Initialize all components / 初始化所有组件."""
@@ -202,6 +203,10 @@ class VisionSystem:
                     elif key == ord("r"):
                         self.visualizer.reset_fps()
                         logger.info(t("fps_reset"))
+                else:
+                    # Headless mode: throttle to avoid 100% CPU spin
+                    # 无显示模式: 限速以避免 CPU 占满
+                    time.sleep(0.001)
 
                 self._frame_count += 1
 
@@ -226,12 +231,17 @@ class VisionSystem:
             self.shutdown()
 
     def _get_system_info(self) -> dict:
-        """Get system resource usage (for display) / 获取系统资源使用信息."""
+        """Get system resource usage (throttled to every 30 frames)."""
+        # Throttle psutil calls to avoid per-frame overhead
+        # 限制 psutil 调用频率, 避免逐帧开销
+        if self._frame_count % 30 != 0 and self._cached_sysinfo is not None:
+            return self._cached_sysinfo
         try:
             import psutil
             cpu = psutil.cpu_percent(interval=None)
             mem = psutil.virtual_memory().percent
-            return {"CPU": f"{cpu:.0f}%", "MEM": f"{mem:.0f}%"}
+            self._cached_sysinfo = {"CPU": f"{cpu:.0f}%", "MEM": f"{mem:.0f}%"}
+            return self._cached_sysinfo
         except Exception:
             return {}
 

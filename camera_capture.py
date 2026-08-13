@@ -44,6 +44,7 @@ class CameraCapture:
 
         self.cap = None
         self._is_running = False
+        self._read_failed = False  # Throttle consecutive read-failure warnings
 
     def open(self) -> bool:
         """Open the camera device or video file."""
@@ -136,9 +137,14 @@ class CameraCapture:
 
         ret, frame = self.cap.read()
         if not ret or frame is None:
-            logger.warning(t("frame_read_fail"))
+            # Throttle warnings: only log first failure, not every consecutive one
+            # 限制警告频率: 仅首次失败记录, 非每次都记录
+            if not self._read_failed:
+                logger.warning(t("frame_read_fail"))
+                self._read_failed = True
             return None
 
+        self._read_failed = False
         return frame
 
     def read_batch(self, count: int = 1) -> list[np.ndarray]:
