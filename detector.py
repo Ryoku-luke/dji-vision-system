@@ -109,6 +109,10 @@ class OpenVINODetector:
         Returns:
             True 如果加载成功
         """
+        # L-14: 检查后端依赖是否安装
+        if not self._check_backend_dependencies():
+            return False
+
         from ultralytics import YOLO
 
         if not self.model_path.exists():
@@ -160,6 +164,44 @@ class OpenVINODetector:
             return "cpu"
         else:
             return "cpu"
+
+    def _check_backend_dependencies(self) -> bool:
+        """检查当前后端所需的依赖是否已安装 (L-14)"""
+        if MODEL.backend in ("cuda", "tensorrt"):
+            try:
+                import torch
+                if not torch.cuda.is_available():
+                    logger.error(f"CUDA 不可用! 当前后端: {MODEL.backend}")
+                    logger.error("请确认:")
+                    logger.error("  1. 已安装 NVIDIA 显卡驱动 (nvidia-smi 可用)")
+                    logger.error("  2. 已安装 CUDA 版 PyTorch (非 CPU 版)")
+                    logger.error("  3. 运行: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+                    logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'openvino'")
+                    return False
+            except ImportError:
+                logger.error("PyTorch 未安装! CUDA/TensorRT 后端需要 PyTorch")
+                logger.error("  运行: pip install -r requirements-optional.txt")
+                logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'openvino'")
+                return False
+
+            if MODEL.backend == "tensorrt":
+                try:
+                    import tensorrt  # noqa: F401
+                except ImportError:
+                    logger.error("TensorRT 未安装! TensorRT 后端需要 TensorRT 运行库")
+                    logger.error("  请安装与 CUDA 版本对应的 TensorRT")
+                    logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'cuda'")
+                    return False
+
+        if MODEL.backend == "openvino":
+            try:
+                import openvino  # noqa: F401
+            except ImportError:
+                logger.error("OpenVINO 未安装! OpenVINO 后端需要 openvino 包")
+                logger.error("  运行: pip install openvino")
+                return False
+
+        return True
 
     def detect(self, frame: np.ndarray) -> DetectionResult:
         """

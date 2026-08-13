@@ -10,7 +10,7 @@
 - **多后端**: OpenVINO (Intel) / CUDA (NVIDIA) / TensorRT (NVIDIA) 三种推理后端可切换
 - **高性能**: INT8 量化 + Arc GPU 加速, 最高 97 FPS 实时检测
 - **易部署**: 支持预导出模型一键下载, 无需手动校准
-- **高质量**: 101 个 pytest 单元测试 + GitHub Actions CI/CD 流水线
+- **高质量**: 106 个 pytest 单元测试 + GitHub Actions CI/CD 流水线
 - **多功能**: 视频文件输入、类别过滤、检测日志、画面镜像、视频保存
 
 ---
@@ -237,9 +237,9 @@ def _detect_api_backend() -> int:
 
 | 后端 | 配置值 | 设备示例 | 适用平台 | 说明 |
 |------|--------|---------|---------|------|
-| OpenVINO | `"openvino"` | `intel:gpu` / `intel:cpu` | Intel | 默认，支持 INT8 量化，Arc GPU 最快 |
-| CUDA | `"cuda"` | `0` / `cpu` | NVIDIA | 需 CUDA 版 PyTorch，直接加载 .pt 模型 |
-| TensorRT | `"tensorrt"` | `0` | NVIDIA | 最快推理，需导出 TensorRT 引擎 |
+| OpenVINO | `"openvino"` | `intel:gpu` / `intel:cpu` | Intel (Windows/Linux) | 默认，支持 INT8 量化，Arc GPU 最快。macOS 仅支持 CPU |
+| CUDA | `"cuda"` | `0` / `cpu` | NVIDIA (Windows/Linux) | 需 CUDA 版 PyTorch，直接加载 .pt 模型。不支持 macOS |
+| TensorRT | `"tensorrt"` | `0` | NVIDIA (Windows/Linux) | 最快推理，需导出 TensorRT 引擎。不支持 macOS |
 
 ```python
 # config.py 切换后端
@@ -290,6 +290,8 @@ source venv/bin/activate     # Linux/macOS
 
 # 3. 安装依赖
 pip install -r requirements.txt
+#   如需使用 NVIDIA GPU (CUDA/TensorRT) 后端, 另请安装:
+#   pip install -r requirements-optional.txt
 
 # 4. 获取模型 (二选一)
 #   方式 A: 下载预导出模型 (推荐, 快速)
@@ -497,7 +499,7 @@ python main.py --input video.mp4 --classes person,car --flip --save --log-detect
 
 | 脚本 | 参数 | 说明 |
 |------|------|------|
-| `main.py` | `--device` | 推理设备 (`intel:gpu` / `intel:npu` / `intel:cpu`) |
+| `main.py` | `--device` | 推理设备 (OpenVINO: `intel:gpu`/`intel:npu`/`intel:cpu`; CUDA: `0`/`cpu`; TensorRT: `0`) |
 | `main.py` | `--confidence` | 置信度阈值 (默认: 0.5) |
 | `main.py` | `--iou` | NMS IoU 阈值 (默认: 0.5) |
 | `main.py` | `--classes` | 仅检测指定类别, 逗号分隔 (如 `person,car,0`) |
@@ -534,7 +536,7 @@ dji-vision-system/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml         # GitHub Actions CI/CD (H-04, 语法检查/测试/代码质量)
-├── tests/                 # 自动化测试 (H-03/H-09, 101 个 pytest 用例)
+├── tests/                 # 自动化测试 (H-03/H-09, 106 个 pytest 用例)
 │   ├── conftest.py        # 测试 fixtures (含 cv2 桩模块)
 │   ├── test_config.py     # 配置模块测试 (16 个)
 │   ├── test_detector.py   # 检测器测试 (19 个, 含 BUG-01 回归)
@@ -589,10 +591,14 @@ class ModelConfig:
     calib_data: str = "coco128.yaml"     # 校准数据集
     calib_fraction: float = 0.1          # 使用 10% 数据校准
     # --- 推理设备 ---
-    inference_device: str = "intel:gpu"  # intel:gpu / intel:npu / intel:cpu
+    inference_device: str = "intel:gpu"  # OpenVINO: intel:gpu/intel:cpu | CUDA: 0/cpu | TensorRT: 0
     # --- 检测参数 ---
     conf_threshold: float = 0.5          # 置信度阈值
     iou_threshold: float = 0.5           # NMS IoU 阈值
+    # --- 计算属性 (只读, 自动根据 backend/精度生成) ---
+    # model_path:     原始 PyTorch 模型路径 (models/yolo26s.pt)
+    # exported_path:  导出后的模型路径 (根据后端和精度自动生成)
+    # needs_export:   是否需要导出步骤 (openvino/tensorrt=True, cuda=False)
 ```
 
 ### 显示与输出配置 (`DisplayConfig`)
@@ -616,7 +622,9 @@ class DisplayConfig:
     log_path: Path = Path("output/detections.csv")
 ```
 
-### 模型选择参考 (155H 实测数据)
+### 模型选择参考 (155H Arc GPU 实测数据)
+
+> 以下数据基于 Intel Core Ultra 7 155H Arc GPU + OpenVINO INT8 实测。CUDA/TensorRT 后端的 FPS 因 NVIDIA GPU 型号不同差异较大, 建议使用 `python export_model.py --benchmark` 自行测试。
 
 | 模型 | INT8 推理时间 | 对应 FPS | 适用场景 |
 |------|:-----------:|:-------:|---------|
@@ -626,15 +634,38 @@ class DisplayConfig:
 | yolo26l | 20.31 ms | ~49 fps | 高精度, 接近极限 |
 | yolo26x | 35.16 ms | ~28 fps | 最高精度, 无法实时 |
 
+### 各后端性能对比参考
+
+| 后端 | 精度 | 典型推理速度 | 说明 |
+|------|------|:-----------:|------|
+| OpenVINO (Intel Arc GPU) | INT8 | ~97 fps (yolo26s) | Intel 平台最优, INT8 量化加速 |
+| OpenVINO (Intel CPU) | INT8 | ~15-25 fps | 无 GPU 时的回退方案 |
+| CUDA (NVIDIA GPU) | FP32/FP16 | 因 GPU 型号而异 | 需 CUDA 版 PyTorch, 直接加载 .pt |
+| TensorRT (NVIDIA GPU) | INT8/FP16 | 最快 (因 GPU 型号而异) | 需导出 TensorRT 引擎, 推理最快 |
+| OpenVINO (macOS) | INT8 | ~10-20 fps (CPU only) | macOS 上 OpenVINO 仅支持 CPU 推理 |
+
 ---
 
 ## 性能优化建议
 
 ### 1. 推理优化
 
+#### 通用
+
 - **使用 INT8 量化**: 比 FP32 快 2-3 倍, 精度损失约 1-3%
-- **使用 Arc GPU**: `device="intel:gpu"` 比 CPU 快 6-15 倍
 - **预热推理引擎**: 首次推理较慢 (需编译内核), 之后稳定
+
+#### OpenVINO (Intel)
+
+- **使用 Arc GPU**: `device="intel:gpu"` 比 CPU 快 6-15 倍
+- **INT8 量化**: 导出时启用 `int8=True`, 配合 COCO128 校准数据
+
+#### CUDA/TensorRT (NVIDIA)
+
+- **TensorRT FP16**: 设置 `half=True`, 精度损失极小, 速度提升显著
+- **TensorRT INT8**: 设置 `int8=True`, 需校准数据, 速度最快
+- **CUDA 后端**: 直接使用 PyTorch `.pt` 模型, 适合快速验证; 如需极致性能请切换到 TensorRT
+- **GPU 显存**: 确保显存充足 (yolo26s 需 ~1GB), 显存不足时会自动回退 CPU
 
 ### 2. 取流优化
 
@@ -652,7 +683,7 @@ class DisplayConfig:
 
 ## 自动化测试
 
-项目内置 **101 个 pytest 单元测试**（H-03/H-09），覆盖核心模块的参数处理、异常捕获、分辨率同步、设备回退、跨平台后端检测、多后端推理等逻辑，防止代码回归。
+项目内置 **106 个 pytest 单元测试**（H-03/H-09），覆盖核心模块的参数处理、异常捕获、分辨率同步、设备回退、跨平台后端检测、多后端推理等逻辑，防止代码回归。
 
 ### 运行测试
 
@@ -756,21 +787,50 @@ python export_model.py --benchmark
 
 ### Q: 提示 "模型文件不存在"
 
-需要先导出模型: `python export_model.py`
+需要先获取模型 (二选一):
 
-### Q: GPU 设备不可用
+```bash
+# 方式 A: 下载预导出模型 (推荐)
+python download_model.py
+
+# 方式 B: 手动导出
+python export_model.py
+```
+
+> CUDA 后端直接使用 `.pt` 模型, 无需导出; OpenVINO/TensorRT 后端需要先导出。
+
+### Q: GPU 设备不可用 (Intel Arc / OpenVINO)
 
 1. 确认安装了 Intel Arc 显卡驱动
 2. 确认 OpenVINO 版本 >= 2024.0
 3. 运行 `python -c "from openvino import Core; print(Core().available_devices)"`
 4. 如 GPU 不在列表中, 回退使用 CPU: `python main.py --device intel:cpu`
 
+### Q: GPU 设备不可用 (NVIDIA / CUDA / TensorRT)
+
+1. 确认安装了 NVIDIA 驱动 (525+): `nvidia-smi`
+2. 确认安装了 CUDA 版 PyTorch:
+   ```bash
+   python -c "import torch; print('CUDA 可用:', torch.cuda.is_available())"
+   # 应输出: CUDA 可用: True
+   ```
+3. 如显示 `False`, 需重新安装 CUDA 版 PyTorch:
+   ```bash
+   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+   ```
+4. 确认已安装可选依赖: `pip install -r requirements-optional.txt`
+5. TensorRT 后端需额外安装 TensorRT, 并确认 `tensorrt` 可导入
+6. 如 GPU 不可用, 回退使用 CPU: `python main.py --device cpu`
+
 ### Q: 推理速度比基准慢
 
 1. 确认使用了 INT8 模型 (检查 models/exported/ 目录名包含 int8)
-2. 确认设备为 intel:gpu (查看终端输出)
+2. 确认推理设备正确:
+   - OpenVINO: `intel:gpu` (查看终端输出的设备信息)
+   - CUDA: `0` (查看终端输出)
 3. 运行 `python export_model.py --benchmark` 查看基准
 4. 检查是否因散热问题导致降频
+5. CUDA/TensorRT 用户: 确认 `nvidia-smi` 显示 GPU 利用率正常
 
 ### Q: UVC 模式下画面卡顿
 
@@ -786,14 +846,14 @@ python export_model.py --benchmark
 
 ### 测试概览
 
-三次代码审查共发现 **14 个 BUG**（严重 3 / 中等 5 / 轻微 6），涉及 5 个源码文件。所有修复均通过 `py_compile` 语法验证和 101 个 pytest 单元测试，代码已推送至 GitHub。
+三次代码审查共发现 **14 个 BUG**（严重 3 / 中等 5 / 轻微 6），涉及 5 个源码文件。所有修复均通过 `py_compile` 语法验证和 106 个 pytest 单元测试，代码已推送至 GitHub。
 
 | 指标 | 数值 |
 |------|------|
 | 发现 BUG 总数 | 14 |
 | 已修复 BUG | 14 |
 | 语法检查通过 | 6/6 |
-| 单元测试通过 | 101/101 |
+| 单元测试通过 | 106/106 |
 | 涉及文件数 | 5 |
 | 代码变更 | +155 行 / -42 行 |
 
@@ -1150,7 +1210,7 @@ python export_model.py --benchmark
 
 ### 后续建议
 
-1. ~~**集成单元测试框架**~~: 已完成 - 101 个 pytest 用例覆盖核心模块、跨平台后端、多后端推理
+1. ~~**集成单元测试框架**~~: 已完成 - 106 个 pytest 用例覆盖核心模块、跨平台后端、多后端推理
 2. **端到端集成测试**: 在真实 DJI 相机 + Intel 155H 硬件环境下验证 UVC 采集 → OpenVINO 推理 → 可视化输出完整链路
 3. ~~**CI/CD 流水线**~~: 已完成 - GitHub Actions 配置了 py_compile 语法检查、pytest 单元测试、pylint/mypy 代码质量检查
 4. **类型注解强化**: 使用 `mypy` 进行静态类型检查，从类型层面预防 BUG-01 类 falsy 判断问题
@@ -1167,6 +1227,16 @@ python export_model.py --benchmark
 | Ultralytics | 8.4+ | YOLO26 模型管理 |
 | OpenCV | 4.9+ | 跨平台 UVC 采集 (Windows/Linux/macOS) |
 | NumPy | 1.24+ | 数组运算 |
-| pytest | 8.0+ | 单元测试框架 (101 个用例) |
+| pytest | 8.0+ | 单元测试框架 (106 个用例) |
 | PyTorch | 2.0+ | CUDA 后端 (可选, 仅 NVIDIA, 需 CUDA 版安装) |
 | TensorRT | 8.6+ | TensorRT 后端 (可选, 仅 NVIDIA, 不支持 macOS) |
+
+### PyTorch 与 CUDA 版本对照
+
+| PyTorch 版本 | CUDA 版本 | 安装命令 |
+|-------------|----------|---------|
+| 2.0 - 2.1 | 11.7 / 11.8 | `pip install torch --index-url https://download.pytorch.org/whl/cu118` |
+| 2.2 - 2.3 | 11.8 / 12.1 | `pip install torch --index-url https://download.pytorch.org/whl/cu121` |
+| 2.4+ | 12.1 / 12.4 | `pip install torch --index-url https://download.pytorch.org/whl/cu124` |
+
+> 安装前请运行 `nvidia-smi` 确认驱动支持的 CUDA 最高版本。TensorRT 版本需与 CUDA 版本对应。

@@ -285,3 +285,87 @@ class TestDeviceFallback:
 
         # 退出 patch 后, 全局 MODEL 应保持原值 (默认 "openvino")
         assert global_model.backend == original_backend
+
+
+# ============================================================
+# 4. 后端依赖检查测试 (L-14)
+# ============================================================
+class TestBackendDependencyCheck:
+    """
+    后端依赖检查测试 (OpenVINODetector._check_backend_dependencies)
+
+    验证:
+      - openvino 后端: openvino 可导入 -> True, 不可导入 -> False
+      - cuda 后端: torch.cuda 可用 -> True, 不可用 -> False, torch 未安装 -> False
+      - tensorrt 后端: torch+cuda+tensorrt 均可用 -> True, tensorrt 缺失 -> False
+    """
+
+    def test_openvino_backend_success(self):
+        """OpenVINO 后端, openvino 已安装 -> True"""
+        mock_model = MagicMock()
+        mock_model.backend = "openvino"
+        with patch("detector.MODEL", mock_model):
+            with patch("builtins.__import__") as mock_import:
+                def custom_import(name, *args, **kwargs):
+                    if name == "openvino":
+                        return MagicMock()
+                    return __builtins__.__import__(name, *args, **kwargs) if hasattr(__builtins__, '__import__') else MagicMock()
+                mock_import.side_effect = custom_import
+                detector = OpenVINODetector()
+                assert detector._check_backend_dependencies() is True
+
+    def test_cuda_backend_no_torch(self):
+        """CUDA 后端, PyTorch 未安装 -> False"""
+        mock_model = MagicMock()
+        mock_model.backend = "cuda"
+        with patch("detector.MODEL", mock_model):
+            with patch("builtins.__import__", side_effect=ImportError("No module named 'torch'")):
+                detector = OpenVINODetector()
+                assert detector._check_backend_dependencies() is False
+
+    def test_cuda_backend_torch_no_cuda(self):
+        """CUDA 后端, PyTorch 已安装但 CUDA 不可用 -> False"""
+        mock_model = MagicMock()
+        mock_model.backend = "cuda"
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = False
+
+        with patch("detector.MODEL", mock_model):
+            with patch.dict("sys.modules", {"torch": mock_torch}):
+                detector = OpenVINODetector()
+                assert detector._check_backend_dependencies() is False
+
+    def test_cuda_backend_success(self):
+        """CUDA 后端, PyTorch+CUDA 可用 -> True"""
+        mock_model = MagicMock()
+        mock_model.backend = "cuda"
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+
+        with patch("detector.MODEL", mock_model):
+            with patch.dict("sys.modules", {"torch": mock_torch}):
+                detector = OpenVINODetector()
+                assert detector._check_backend_dependencies() is True
+
+    def test_tensorrt_backend_no_tensorrt(self):
+        """TensorRT 后端, torch+CUDA 可用但 TensorRT 未安装 -> False"""
+        mock_model = MagicMock()
+        mock_model.backend = "tensorrt"
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+
+        original_import = __import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "tensorrt":
+                raise ImportError("No module named 'tensorrt'")
+            return original_import(name, *args, **kwargs)
+
+        with patch("detector.MODEL", mock_model):
+            with patch.dict("sys.modules", {"torch": mock_torch}):
+                with patch("builtins.__import__", side_effect=mock_import):
+                    detector = OpenVINODetector()
+                    assert detector._check_backend_dependencies() is False
