@@ -75,6 +75,32 @@ _MSG = {
     "log_init_skip": {"zh": "检测日志初始化失败, 将忽略日志记录", "en": "Detection log init failed, logging disabled"},
     # ---- resolution ----
     "res_mismatch": {"zh": "请求 {w}x{h}, 实际 {aw}x{ah} (部分相机不支持自定义分辨率)", "en": "Requested {w}x{h}, got {aw}x{ah} (some cameras ignore custom resolution)"},
+    # ---- system info ----
+    "info_backend": {"zh": "  后端: {backend} | YOLO + {display}", "en": "  Backend: {backend} | YOLO + {display}"},
+    "info_model": {"zh": "  模型: {name} ({precision})", "en": "  Model: {name} ({precision})"},
+    "source_video_file": {"zh": "视频文件", "en": "Video file"},
+    "source_uvc_camera": {"zh": "UVC 摄像头", "en": "UVC camera"},
+    "info_source": {"zh": "  视频源: {type} ({w}x{h} @ {fps}fps)", "en": "  Source: {type} ({w}x{h} @ {fps}fps)"},
+    "info_thresholds": {"zh": "  置信度: {conf} | IoU: {iou}", "en": "  Confidence: {conf} | IoU: {iou}"},
+    "device_label": {"zh": "设备", "en": "Device"},
+    "info_class_filter": {"zh": "  类别过滤: {classes}", "en": "  Class filter: {classes}"},
+    "info_mirror": {"zh": "  画面镜像: 已启用", "en": "  Mirror: enabled"},
+    "info_detection_log": {"zh": "  检测日志: {path}", "en": "  Detection log: {path}"},
+    "hotkey_hint": {"zh": "\n按 q 退出 | s 截图 | r 重置FPS计数\n", "en": "\nPress q to quit | s for screenshot | r to reset FPS\n"},
+    # ---- model errors / hints ----
+    "model_not_found_path": {"zh": "未找到模型: {path}", "en": "Model not found: {path}"},
+    "model_export_hint": {"zh": "请先运行模型导出: python export_model.py", "en": "Run model export first: python export_model.py"},
+    "model_download_hint": {"zh": "  或下载预导出模型: python download_model.py", "en": "  Or download pre-exported model: python download_model.py"},
+    "model_download_first": {"zh": "请先下载模型: python download_model.py", "en": "Download model first: python download_model.py"},
+    "model_export_or_download": {"zh": "  或运行: python export_model.py --model yolo26s.pt", "en": "  Or run: python export_model.py --model yolo26s.pt"},
+    "model_pt_download_hint": {"zh": "请运行: python export_model.py --model yolo26s.pt 以下载 .pt 模型", "en": "Run: python export_model.py --model yolo26s.pt to download .pt model"},
+    "loading_model": {"zh": "加载模型: {path}", "en": "Loading model: {path}"},
+    "infer_backend_info": {"zh": "推理后端: {backend} | 设备: {device}", "en": "Inference backend: {backend} | Device: {device}"},
+    # ---- camera check ----
+    "camera_check": {"zh": "请检查:", "en": "Please check:"},
+    "camera_check_1": {"zh": "  1. DJI 相机已通过 Type-C 线连接电脑", "en": "  1. DJI camera is connected via Type-C cable"},
+    "camera_check_2": {"zh": "  2. 相机屏幕上已选择 '网络摄像头' 模式", "en": "  2. Camera screen shows 'Webcam' mode"},
+    "camera_check_3": {"zh": "  3. 没有其他程序正在占用该摄像头", "en": "  3. No other program is using the camera"},
 }
 
 

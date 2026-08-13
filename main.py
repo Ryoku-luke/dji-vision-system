@@ -78,7 +78,7 @@ class VisionSystem:
         logger.info("=" * 60)
         logger.info(f"  {t('system_title')}")
         backend_display = _BACKEND_NAMES.get(MODEL.backend, MODEL.backend.upper())
-        logger.info(f"  后端: {MODEL.backend.upper()} | YOLO + {backend_display}")
+        logger.info(t("info_backend", backend=MODEL.backend.upper(), display=backend_display))
         logger.info("=" * 60)
 
         # 1. Load inference model / 加载推理模型
@@ -123,19 +123,20 @@ class VisionSystem:
                 self._detection_logger = None
 
         logger.info(f"\n{t('init_done')}!")
-        logger.info(f"  模型: {MODEL.model_name} ({'INT8' if MODEL.int8 else 'FP16' if MODEL.half else 'FP32'})")
-        logger.info(f"  设备: {self.detector.device}")
-        source_type = "视频文件" if self.camera.is_file else "UVC 摄像头"
-        logger.info(f"  视频源: {source_type} ({self.camera.width}x{self.camera.height} @ {self.camera.fps}fps)")
-        logger.info(f"  置信度: {self.detector.conf_threshold} | IoU: {self.detector.iou_threshold}")
+        precision = "INT8" if MODEL.int8 else ("FP16" if MODEL.half else "FP32")
+        logger.info(t("info_model", name=MODEL.model_name, precision=precision))
+        logger.info(f"  {t('device_label')}: {self.detector.device}")
+        source_type = t("source_video_file") if self.camera.is_file else t("source_uvc_camera")
+        logger.info(t("info_source", type=source_type, w=self.camera.width, h=self.camera.height, fps=self.camera.fps))
+        logger.info(t("info_thresholds", conf=self.detector.conf_threshold, iou=self.detector.iou_threshold))
         if self.classes is not None:
             class_names = [CLASSES[i] if i < len(CLASSES) else str(i) for i in self.classes]
-            logger.info(f"  类别过滤: {class_names}")
+            logger.info(t("info_class_filter", classes=class_names))
         if self.mirror:
-            logger.info("  画面镜像: 已启用")
+            logger.info(t("info_mirror"))
         if self.log_detections and self._detection_logger:
-            logger.info(f"  检测日志: {DISPLAY.log_path}")
-        logger.info("\n按 q 退出 | s 截图 | r 重置FPS计数\n")
+            logger.info(t("info_detection_log", path=DISPLAY.log_path))
+        logger.info(t("hotkey_hint"))
 
         return True
 
@@ -416,15 +417,12 @@ Examples / 示例:
 
     # Check model exists / 检查模型是否存在
     if not MODEL.exported_path.exists():
-        logger.error(f"未找到模型: {MODEL.exported_path}")
+        logger.error(t("model_not_found_path", path=MODEL.exported_path))
         if MODEL.needs_export:
-            # OpenVINO / TensorRT: export or download pre-exported model / 导出或下载预导出模型
-            logger.error("请先运行模型导出: python export_model.py")
-            logger.error("  或下载预导出模型: python download_model.py")
+            logger.error(t("model_export_hint"))
+            logger.error(t("model_download_hint"))
         else:
-            # CUDA: download_model.py only handles OpenVINO; use export_model.py for the .pt model
-            # CUDA: download_model.py 仅支持 OpenVINO, 用 export_model.py 下载 .pt 模型
-            logger.error("请运行: python export_model.py --model yolo26s.pt 以下载 .pt 模型")
+            logger.error(t("model_pt_download_hint"))
         sys.exit(1)
 
     # Parse class filter / 解析类别过滤

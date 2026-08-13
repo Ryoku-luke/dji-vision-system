@@ -104,18 +104,16 @@ class OpenVINODetector:
 
         if not self.model_path.exists():
             logger.error(t("model_not_found"))
-            # Provide guidance based on whether export is needed
-            # 根据是否需要导出提供提示
             if MODEL.needs_export:
-                logger.error("请先运行模型导出: python export_model.py")
-                logger.error("  或下载预导出模型: python download_model.py")
+                logger.error(t("model_export_hint"))
+                logger.error(t("model_download_hint"))
             else:
-                logger.error("请先下载模型: python download_model.py")
-                logger.error("  或运行: python export_model.py --model yolo26s.pt")
+                logger.error(t("model_download_first"))
+                logger.error(t("model_export_or_download"))
             return False
 
-        logger.info(f"加载模型: {self.model_path}")
-        logger.info(f"推理后端: {MODEL.backend} | 设备: {self.device}")
+        logger.info(t("loading_model", path=self.model_path))
+        logger.info(t("infer_backend_info", backend=MODEL.backend, device=self.device))
 
         self.model = YOLO(str(self.model_path))
 
@@ -308,7 +306,7 @@ class OpenVINODetector:
         dummy = np.zeros((MODEL.imgsz, MODEL.imgsz, 3), dtype=np.uint8)
 
         for i in range(iterations):
-            self.model.predict(dummy, device=self.device, verbose=False)
+            self.model.predict(dummy, **self._predict_kwargs)
 
         logger.info(t("model_warmup_done"))
 

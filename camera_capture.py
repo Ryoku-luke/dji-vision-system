@@ -61,10 +61,10 @@ class CameraCapture:
 
         if not self.cap.isOpened():
             logger.error(t("camera_open_fail", index=self.device_index))
-            logger.error("请检查:")
-            logger.error("  1. DJI 相机已通过 Type-C 线连接电脑")
-            logger.error("  2. 相机屏幕上已选择 '网络摄像头' 模式")
-            logger.error("  3. 没有其他程序正在占用该摄像头")
+            logger.error(t("camera_check"))
+            logger.error(t("camera_check_1"))
+            logger.error(t("camera_check_2"))
+            logger.error(t("camera_check_3"))
             return False
 
         # Set capture parameters

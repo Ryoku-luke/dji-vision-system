@@ -176,6 +176,12 @@ class Visualizer:
         panel_w = max_width + padding * 2
         panel_h = len(lines) * line_height + padding
 
+        # Clamp panel size to frame dimensions (prevents ROI out-of-bounds)
+        # 将面板尺寸限制在帧范围内 (防止 ROI 越界)
+        frame_h, frame_w = frame.shape[:2]
+        panel_w = min(panel_w, frame_w)
+        panel_h = min(panel_h, frame_h)
+
         # Semi-transparent background (only copy the panel region, not the full frame)
         # 半透明背景 (仅拷贝面板区域, 避免整帧拷贝)
         roi = frame[0:panel_h, 0:panel_w]
