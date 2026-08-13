@@ -2,6 +2,27 @@
 
 基于 **DJI Osmo Action 运动相机** + **Intel Core Ultra 7 155H** + **OpenVINO + YOLO** 的实时目标检测系统。
 
+利用 DJI 运动相机的 UVC 网络摄像头模式采集视频，通过 Intel Arc 集成 GPU 进行 OpenVINO INT8 加速推理，实现 80 类目标的实时检测，推理速度最高可达 **97 FPS**（yolo26s INT8）。
+
+---
+
+## 目录
+
+- [系统架构](#系统架构)
+- [功能清单](#功能清单)
+- [环境要求](#环境要求)
+- [快速开始](#快速开始)
+- [环境搭建步骤](#环境搭建步骤)
+- [使用方法](#使用方法)
+- [项目结构](#项目结构)
+- [配置说明](#配置说明)
+- [性能优化建议](#性能优化建议)
+- [常见问题](#常见问题)
+- [BUG 修复测试报告](#bug-修复测试报告)
+- [技术栈版本](#技术栈版本)
+
+---
+
 ## 系统架构
 
 ```
@@ -20,6 +41,100 @@ DJI Action 相机 (UVC 模式)
 │  32GB DDR5 | Intel Arc GPU | NPU         │
 └───────────────────────────────────────────┘
 ```
+
+**数据流**: 相机取流 (OpenCV) → 目标检测 (YOLO + OpenVINO) → 结果可视化 (OpenCV 绘制) → 实时显示 / 视频保存
+
+---
+
+## 功能清单
+
+### 模型导出 (`export_model.py`)
+
+| 功能 | 说明 | 命令 / API |
+|------|------|-----------|
+| YOLO 模型自动下载 | 首次运行自动从 Ultralytics 下载模型权重到 `models/` | `python export_model.py` |
+| OpenVINO INT8 量化导出 | PyTorch → OpenVINO INT8，使用 COCO128 10% 子集校准 | 默认模式 |
+| OpenVINO FP16 / FP32 导出 | 支持三种精度导出，通过 `config.py` 中 `int8` / `half` 开关控制 | 修改 `config.py` |
+| 模型自动重命名归档 | 导出后自动移动到 `models/exported/{model}_{precision}_openvino_model/` | 自动执行 |
+| 模型大小统计 | 导出完成后打印模型文件总大小 (MB) | 自动输出 |
+| 基准测试 | 在 COCO128 上运行基准，输出推理速度 / FPS / mAP50-95 | `--benchmark` |
+| CLI 参数 | 指定模型名称、导出设备、是否运行基准测试 | `--model` / `--device` / `--benchmark` |
+
+### 摄像头采集 (`camera_capture.py`)
+
+| 功能 | 说明 | API |
+|------|------|-----|
+| UVC 设备打开 | 通过 OpenCV VideoCapture + MSMF 后端连接 DJI 相机 | `open()` |
+| 分辨率 / 帧率配置 | 可配置 1920x1080 @ 30fps，自动设置 `CAP_PROP_*` 参数 | 构造函数参数 |
+| 分辨率不匹配警告 | 实际分辨率与请求值不一致时输出 warning 日志 | `open()` 内置 |
+| 缓冲帧优化 | `buffer_size=1` 最大限度降低取流延迟 | `config.py` 配置 |
+| 单帧读取 | 返回 BGR 格式图像帧，读取失败返回 `None` | `read()` |
+| 批量读取 | 连续读取多帧，用于预热或批量处理 | `read_batch(count)` |
+| 相机预热 | 丢弃前几帧，等待自动曝光 / 白平衡稳定 | `warmup(frames)` |
+| 设备列表 | 逐个探测 5 个设备索引，返回可用列表 | `list_devices()` |
+| 上下文管理器 | 支持 `with` 语法自动释放资源 | `__enter__` / `__exit__` |
+
+### 目标检测 (`detector.py`)
+
+| 功能 | 说明 | API |
+|------|------|-----|
+| OpenVINO 模型加载 | 从 `models/exported/` 加载导出后的 OpenVINO 模型 | `load()` |
+| 设备验证 | 加载后执行空推理验证 GPU 可用性 | `load()` 内置 |
+| GPU → CPU 自动回退 | GPU 验证失败时自动回退到 CPU，CPU 也失败则返回 `False` | `load()` 内置 |
+| 单帧检测 | 返回 `DetectionResult`（含边界框、置信度、类别、推理耗时） | `detect(frame)` |
+| 批量检测 | 利用 OpenVINO 批量推理优化，返回多帧结果 | `detect_batch(frames)` |
+| 按类别过滤 | 从检测结果中筛选指定类别的目标 | `filter_by_class(class_ids)` |
+| 按置信度过滤 | 从检测结果中筛选高于阈值的目标 | `filter_by_confidence(threshold)` |
+| 检测结果属性 | `Detection` 提供 `bbox` / `width` / `height` / `center` 属性 | 属性访问 |
+| 纯推理 FPS 计算 | 基于推理耗时计算纯推理 FPS（不含取流和后处理） | `DetectionResult.fps` |
+| 推理预热 | 跑空推理让 OpenVINO 完成内核编译和缓存 | `warmup(iterations)` |
+| 上下文管理器 | 支持 `with` 语法自动释放资源 | `__enter__` / `__exit__` |
+| COCO 80 类支持 | 内置 80 个类别名称，检测结果自动映射类别名 | `config.py` 中 `COCO_CLASSES` |
+
+### 可视化 (`visualizer.py`)
+
+| 功能 | 说明 | API |
+|------|------|-----|
+| 边界框绘制 | 每个类别使用固定颜色（20 色调色板循环），可配置线宽 | `draw()` 内置 |
+| 标签显示 | 类别名称 + 置信度数值，带背景色填充 | `draw()` 内置 |
+| FPS 计数器 | 30 帧滑动窗口平均，避免数值跳动 | `FPSCounter` 类 |
+| 信息面板 | 左上角半透明面板显示 FPS / 推理耗时 / 检测目标数 / CPU / 内存 | `draw()` 内置 |
+| 额外信息扩展 | 接受 `extra_info` 字典，支持显示自定义键值对 | `draw(frame, result, extra_info)` |
+| FPS 重置 | 暂停后恢复时重置计数器 | `reset_fps()` |
+| 视频写入 | MP4V 编码输出，自动读取摄像头实际分辨率 | `VideoWriter` 类 |
+| 截图保存 | 按键保存当前帧到 `output/screenshots/` | `main.py` 中 `_save_screenshot()` |
+
+### 主程序 (`main.py`)
+
+| 功能 | 说明 | 命令 / 快捷键 |
+|------|------|-------------|
+| 三阶段初始化 | 模型加载 → 摄像头打开 → 视频写入器初始化 | 自动执行 |
+| 实时检测主循环 | 取流 → 推理 → 可视化 → 显示 / 保存 → 键盘交互 | `python main.py` |
+| 退出 | 按 `q` 键安全退出 | `q` |
+| 截图 | 按 `s` 键保存当前帧到 `output/screenshots/` | `s` |
+| 重置 FPS | 按 `r` 键重置 FPS 计数器 | `r` |
+| 系统资源监控 | 通过 `psutil` 实时获取 CPU 和内存使用率，显示在画面上 | 自动执行 |
+| 100 帧统计日志 | 每 100 帧输出平均 FPS / 推理耗时 / 检测目标数 | 自动输出 |
+| 退出总结 | 关闭时输出总帧数 / 总耗时 / 平均 FPS | 自动输出 |
+| 无显示模式 | 仅推理不显示窗口，用于性能测试 | `--no-display` |
+| 视频保存模式 | 将检测结果写入 `output/result.mp4` | `--save` |
+| 指定推理设备 | 覆盖配置文件中的推理设备 | `--device intel:cpu` |
+| 指定置信度 | 覆盖配置文件中的置信度阈值 | `--confidence 0.7` |
+| 列出摄像头 | 列出可用 UVC 设备索引 | `--list-cameras` |
+| 模型缺失检测 | 启动前检查模型文件是否存在，提示运行导出脚本 | 自动检查 |
+| 优雅退出 | `Ctrl+C` 中断信号捕获 + 资源自动释放 | `Ctrl+C` |
+
+### 配置管理 (`config.py`)
+
+| 功能 | 说明 |
+|------|------|
+| 摄像头配置 | 设备索引 / 分辨率 / 帧率 / 缓冲区大小 / API 后端 |
+| 模型配置 | 模型名称 / 导出格式 / 输入尺寸 / INT8 / FP16 开关 / NMS / 校准数据 / 推理设备 / 置信度 / IoU |
+| 路径自动计算 | `model_path` 和 `exported_path` 属性根据精度自动生成路径 |
+| 显示配置 | 窗口开关 / FPS 显示 / 置信度显示 / 类别名显示 / 框线宽 / 字体大小 / 输出路径 |
+| 全局实例 | `CAMERA` / `MODEL` / `DISPLAY` / `CLASSES` 四个全局单例 |
+
+---
 
 ## 环境要求
 
@@ -40,6 +155,33 @@ DJI Action 相机 (UVC 模式)
 | Python | 3.10 / 3.11 / 3.12 |
 | 显卡驱动 | Intel Arc 显卡驱动 (最新版) |
 | Git | 用于克隆仓库 |
+
+---
+
+## 快速开始
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/Ryoku-luke/dji-vision-system.git
+cd dji-vision-system
+
+# 2. 创建虚拟环境
+python -m venv venv
+venv\Scripts\Activate.ps1    # Windows PowerShell
+
+# 3. 安装依赖
+pip install -r requirements.txt
+
+# 4. 导出模型 (首次必须, 需联网下载校准数据)
+python export_model.py
+
+# 5. 连接 DJI 相机 (UVC 模式) 并启动
+python main.py
+```
+
+> 首次导出 INT8 模型会自动下载 COCO128 校准数据集，耗时约 5-15 分钟。
+
+---
 
 ## 环境搭建步骤
 
@@ -126,6 +268,8 @@ print('可用设备:', core.available_devices)
 # 可用摄像头设备: [0]
 ```
 
+---
+
 ## 使用方法
 
 ### 1. 导出模型 (首次运行必须)
@@ -170,6 +314,21 @@ python main.py --no-display
 | `s` | 截图保存到 `output/screenshots/` |
 | `r` | 重置 FPS 计数器 |
 
+### 4. CLI 参数速查
+
+| 脚本 | 参数 | 说明 |
+|------|------|------|
+| `main.py` | `--device` | 推理设备 (`intel:gpu` / `intel:npu` / `intel:cpu`) |
+| `main.py` | `--confidence` | 置信度阈值 (默认: 0.5) |
+| `main.py` | `--no-display` | 不显示实时画面窗口 |
+| `main.py` | `--save` | 保存输出视频到 `output/result.mp4` |
+| `main.py` | `--list-cameras` | 列出可用的摄像头设备 |
+| `export_model.py` | `--model` | 模型名称 (如 `yolo26s.pt`, `yolo26m.pt`) |
+| `export_model.py` | `--device` | 导出时使用的设备 (`cpu` 或 `0`) |
+| `export_model.py` | `--benchmark` | 导出后运行基准测试 |
+
+---
+
 ## 项目结构
 
 ```
@@ -182,39 +341,72 @@ dji-vision-system/
 ├── main.py                # 主程序入口
 ├── requirements.txt       # Python 依赖
 ├── README.md              # 本文件
-├── models/                # 模型文件目录 (自动创建)
+├── models/                # 模型文件目录 (自动创建, 已 gitignore)
 │   ├── yolo26s.pt         # 原始 PyTorch 模型
 │   └── exported/          # 导出后的 OpenVINO 模型
 │       └── yolo26s_int8_openvino_model/
-└── output/                # 输出目录 (自动创建)
+└── output/                # 输出目录 (自动创建, 已 gitignore)
     ├── screenshots/       # 截图
     └── result.mp4         # 输出视频
 ```
 
+---
+
 ## 配置说明
 
-编辑 `config.py` 可调整所有参数:
+编辑 `config.py` 可调整所有参数，无需修改其他源码文件。
 
-### 摄像头配置
+### 摄像头配置 (`CameraConfig`)
 
 ```python
 @dataclass
 class CameraConfig:
-    device_index: int = 0        # 摄像头索引
-    width: int = 1920            # 分辨率宽度
-    height: int = 1080           # 分辨率高度
-    fps: int = 30                # 帧率
+    device_index: int = 0        # UVC 设备索引 (通常 0 表示第一个)
+    width: int = 1920            # 采集分辨率宽度 (1080P)
+    height: int = 1080           # 采集分辨率高度
+    fps: int = 30                # 采集帧率 (UVC 模式下 25 或 30)
+    buffer_size: int = 1         # OpenCV 缓冲帧数 (1 = 最低延迟)
+    api_preference: int = 700    # CAP_MSMF (Windows Media Foundation)
 ```
 
-### 模型配置
+### 模型配置 (`ModelConfig`)
 
 ```python
 @dataclass
 class ModelConfig:
-    model_name: str = "yolo26s.pt"   # 模型选择
-    int8: bool = True                 # INT8 量化
-    inference_device: str = "intel:gpu"  # 推理设备
-    conf_threshold: float = 0.5       # 置信度阈值
+    # --- 模型选择 ---
+    model_name: str = "yolo26s.pt"       # 可选: yolo26n/s/m/l/x
+    # --- OpenVINO 导出参数 ---
+    export_format: str = "openvino"
+    imgsz: int = 640                     # 模型输入尺寸
+    int8: bool = True                    # 启用 INT8 量化 (快 2~3 倍)
+    half: bool = False                   # FP16 量化 (与 INT8 二选一)
+    nms: bool = True                     # 导出时内嵌 NMS
+    # --- INT8 量化校准 ---
+    calib_data: str = "coco128.yaml"     # 校准数据集
+    calib_fraction: float = 0.1          # 使用 10% 数据校准
+    # --- 推理设备 ---
+    inference_device: str = "intel:gpu"  # intel:gpu / intel:npu / intel:cpu
+    # --- 检测参数 ---
+    conf_threshold: float = 0.5          # 置信度阈值
+    iou_threshold: float = 0.5           # NMS IoU 阈值
+```
+
+### 显示与输出配置 (`DisplayConfig`)
+
+```python
+@dataclass
+class DisplayConfig:
+    show_window: bool = True             # 是否显示实时画面窗口
+    window_name: str = "DJI Vision System"
+    show_fps: bool = True                # 显示 FPS
+    show_confidence: bool = True         # 显示置信度数值
+    show_class_name: bool = True         # 显示类别名称
+    box_thickness: int = 2               # 边界框线宽
+    font_scale: float = 0.6             # 字体大小
+    save_output: bool = False            # 是否保存输出视频
+    output_path: Path = Path("output/result.mp4")
+    output_fps: int = 30
 ```
 
 ### 模型选择参考 (155H 实测数据)
@@ -226,6 +418,8 @@ class ModelConfig:
 | yolo26m | 15.99 ms | ~63 fps | 精度优先, 仍满足 30fps |
 | yolo26l | 20.31 ms | ~49 fps | 高精度, 接近极限 |
 | yolo26x | 35.16 ms | ~28 fps | 最高精度, 无法实时 |
+
+---
 
 ## 性能优化建议
 
@@ -246,6 +440,8 @@ class ModelConfig:
 - 长时间运行时垫高笔记本底部, 确保通风
 - 可使用散热底座辅助降温
 - 如频繁降频, 可在电源管理中设置"最佳性能"模式
+
+---
 
 ## 常见问题
 
@@ -279,6 +475,8 @@ class ModelConfig:
 1. 使用 USB 3.0/3.2 接口 (不要用 USB 2.0)
 2. 使用高质量数据线 (DJI 自带线材最佳)
 3. 降低分辨率到 720P 测试
+
+---
 
 ## BUG 修复测试报告
 
@@ -502,6 +700,8 @@ class ModelConfig:
 2. **端到端集成测试**: 在真实 DJI 相机 + Intel 155H 硬件环境下验证 UVC 采集 → OpenVINO 推理 → 可视化输出完整链路
 3. **CI/CD 流水线**: 在 GitHub Actions 中配置 `py_compile` 语法检查和 `pylint` 代码质量检查，每次提交自动运行
 4. **类型注解强化**: 使用 `mypy` 进行静态类型检查，从类型层面预防 BUG-01 类 falsy 判断问题
+
+---
 
 ## 技术栈版本
 
