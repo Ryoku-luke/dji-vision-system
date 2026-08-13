@@ -4,7 +4,7 @@
 
 利用 DJI 运动相机的 UVC 网络摄像头模式采集视频，通过 OpenVINO INT8 加速推理（支持 Intel Arc GPU / NVIDIA CUDA / TensorRT 多后端），实现 80 类目标的实时检测，推理速度最高可达 **97 FPS**（yolo26s INT8, Intel Arc GPU）。
 
-支持 **Windows / Linux / macOS** 三大平台，内置 65 个自动化单元测试和 GitHub Actions CI/CD 流水线。
+支持 **Windows / Linux / macOS** 三大平台，内置 101 个自动化单元测试和 GitHub Actions CI/CD 流水线。
 
 ---
 
@@ -155,6 +155,18 @@ DJI Action 相机 (UVC 模式)          视频文件 (MP4/AVI)
 | 显示配置 | 窗口开关 / FPS 显示 / 置信度显示 / 类别名显示 / 框线宽 / 字体大小 / 镜像 / 输出路径 / 检测日志 |
 | 全局实例 | `CAMERA` / `MODEL` / `DISPLAY` / `CLASSES` 四个全局单例 |
 
+### 模型下载 (`download_model.py`)
+
+| 功能 | 说明 | CLI 参数 |
+|------|------|---------|
+| 下载预导出模型 | 从 GitHub Release 下载预导出的 OpenVINO INT8 模型, 无需手动校准 | `--model yolo26s` |
+| 列出可用模型 | 显示 5 个模型的名称、大小、推理速度、适用场景 | `--list` |
+| 覆盖已有模型 | 下载时覆盖已存在的模型文件 | `--force` |
+| 指定版本 | 下载特定 Release 版本的模型 | `--version v1.0.0` |
+| 下载进度显示 | 实时显示下载进度条 (不依赖 tqdm) | 自动显示 |
+| 模型完整性验证 | 下载后验证 `.xml` 和 `.bin` 文件是否完整 | 自动验证 |
+| 失败提示 | 下载失败时提示使用 `export_model.py` 手动导出 | 自动提示 |
+
 ---
 
 ## 跨平台支持
@@ -207,20 +219,22 @@ MODEL.backend = "tensorrt"     # NVIDIA TensorRT
 
 ### 硬件
 
-| 组件 | 要求 |
-|------|------|
-| 计算机 | Intel Core Ultra 7 155H (或其他 Intel CPU) |
-| 内存 | 16GB+ (推荐 32GB) |
-| 相机 | DJI Osmo Action 3/4/5 Pro/6 |
-| 连接线 | USB Type-C 数据线 (USB 3.2 Gen1 以上) |
+| 组件 | 要求 (OpenVINO) | 要求 (CUDA/TensorRT) |
+|------|----------------|---------------------|
+| CPU | Intel Core Ultra 系列 (推荐 155H) 或任意 x86 CPU | 任意 x86 CPU |
+| GPU | Intel Arc 集成/独立 GPU (推荐, 用于加速) | NVIDIA GPU (计算能力 6.0+) |
+| 内存 | 16GB+ (推荐 32GB) | 16GB+ (推荐 32GB) |
+| 相机 | DJI Osmo Action 3/4/5 Pro/6 (UVC 模式) | 同左 |
+| 连接线 | USB Type-C 数据线 (USB 3.2 Gen1 以上) | 同左 |
 
 ### 软件
 
 | 组件 | 要求 |
 |------|------|
-| 操作系统 | Windows 11 (推荐) 或 Windows 10 |
-| Python | 3.10 / 3.11 / 3.12 |
-| 显卡驱动 | Intel Arc 显卡驱动 (最新版) |
+| 操作系统 | Windows 10/11、Linux (Ubuntu 20.04+)、macOS 12+ (三大平台均支持) |
+| Python | 3.10 / 3.11 / 3.12 / 3.13 |
+| 显卡驱动 | Intel Arc 显卡驱动 (OpenVINO) 或 NVIDIA 驱动 525+ (CUDA) |
+| CUDA | 仅 CUDA/TensorRT 后端需要: CUDA 11.8+ 或 12.x |
 | Git | 用于克隆仓库 |
 
 ---
@@ -262,20 +276,27 @@ python -m pytest tests/ -v
 ### 第一步：安装 Python
 
 1. 访问 https://www.python.org/downloads/ 下载 Python 3.11 或 3.12
-2. 安装时勾选 "Add Python to PATH"
-3. 验证: 打开 PowerShell 或 CMD
+2. 安装时勾选 "Add Python to PATH" (Windows)
+3. 验证:
 
 ```bash
 python --version
 # 输出应为: Python 3.11.x 或 3.12.x
 ```
 
-### 第二步：安装 Intel 显卡驱动
+### 第二步：安装显卡驱动
+
+**OpenVINO 后端 (Intel GPU)**:
 
 1. 访问 https://www.intel.com/content/www/us/en/download-center/home.html
 2. 搜索 "Intel Arc GPU driver" 并下载安装最新版
 3. 重启电脑
-4. 验证: 设备管理器 → 显示适配器 → 应显示 "Intel Arc Graphics"
+
+**CUDA/TensorRT 后端 (NVIDIA GPU)**:
+
+1. 安装 NVIDIA 驱动 (525+): https://www.nvidia.com/drivers
+2. 安装 CUDA Toolkit (11.8+ 或 12.x): https://developer.nvidia.com/cuda-downloads
+3. 安装 cuDNN: https://developer.nvidia.com/cudnn
 
 ### 第三步：创建项目环境
 
@@ -291,6 +312,8 @@ python -m venv venv
 venv\Scripts\Activate.ps1
 # Windows CMD:
 venv\Scripts\activate.bat
+# Linux/macOS:
+source venv/bin/activate
 
 # 升级 pip
 python -m pip install --upgrade pip
@@ -299,11 +322,14 @@ python -m pip install --upgrade pip
 ### 第四步：安装依赖
 
 ```bash
-# 安装所有依赖
+# 安装核心依赖 (必装)
 pip install -r requirements.txt
+
+# 可选: 安装 NVIDIA GPU 后端依赖 (仅 CUDA/TensorRT 用户)
+pip install -r requirements-optional.txt
 ```
 
-如果安装 OpenVINO 较慢, 可使用国内镜像:
+如果安装较慢, 可使用国内镜像:
 
 ```bash
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -328,6 +354,9 @@ core = Core()
 print('可用设备:', core.available_devices)
 # 应输出类似: ['CPU', 'GPU']
 "
+
+# 验证 CUDA 后端 (仅安装了 PyTorch CUDA 版时)
+python -c "import torch; print('CUDA 可用:', torch.cuda.is_available())"
 ```
 
 ### 第六步：连接相机
@@ -458,7 +487,8 @@ dji-vision-system/
 ├── detector.py            # YOLO 推理引擎 (多后端: OpenVINO/CUDA/TensorRT)
 ├── visualizer.py          # 可视化模块 (绘制框/FPS/信息面板/镜像)
 ├── main.py                # 主程序入口
-├── requirements.txt       # Python 依赖
+├── requirements.txt       # Python 核心依赖 (必装)
+├── requirements-optional.txt  # 可选依赖 (CUDA/TensorRT/开发工具)
 ├── README.md              # 本文件
 ├── .github/
 │   └── workflows/
@@ -578,7 +608,7 @@ class DisplayConfig:
 
 ## 自动化测试
 
-项目内置 **65 个 pytest 单元测试**（H-03），覆盖核心模块的参数处理、异常捕获、分辨率同步、设备回退等逻辑，防止代码回归。
+项目内置 **101 个 pytest 单元测试**（H-03/H-09），覆盖核心模块的参数处理、异常捕获、分辨率同步、设备回退、跨平台后端检测、多后端推理等逻辑，防止代码回归。
 
 ### 运行测试
 
@@ -602,6 +632,7 @@ python -m pytest tests/test_detector.py -v
 | `test_detector.py` | 19 | Detection 几何属性、DetectionResult FPS 计算/过滤、BUG-01 回归测试 |
 | `test_camera_capture.py` | 15 | BUG-08 回归测试 (falsy 判断)、视频文件模式、上下文管理器 |
 | `test_main.py` | 15 | `parse_classes()` 名称/ID/混合解析、边界情况 |
+| `test_backend.py` | 36 | 跨平台后端检测、多后端配置路径、设备回退逻辑 (H-09) |
 
 ### BUG 回归测试
 
@@ -1035,11 +1066,11 @@ python export_model.py --benchmark
 
 | 组件 | 版本 | 说明 |
 |------|------|------|
-| Python | 3.10+ | 推荐 3.11 或 3.12 |
-| OpenVINO | 2024.0+ | 最新 2026.3.0 (开发) / 2025.4.1 (维护) |
+| Python | 3.10+ | 推荐 3.11 或 3.12 (支持至 3.13) |
+| OpenVINO | 2024.0+ | 最新正式版 2026.2.1 (2026-06-17 发布) |
 | Ultralytics | 8.4+ | YOLO26 模型管理 |
-| OpenCV | 4.9+ | 跨平台 UVC 采集 |
+| OpenCV | 4.9+ | 跨平台 UVC 采集 (Windows/Linux/macOS) |
 | NumPy | 1.24+ | 数组运算 |
-| pytest | 8.0+ | 单元测试 (可选) |
-| PyTorch | 2.0+ | CUDA 后端 (可选, 仅 NVIDIA) |
-| TensorRT | 8.6+ | TensorRT 后端 (可选, 仅 NVIDIA) |
+| pytest | 8.0+ | 单元测试框架 (65 个用例) |
+| PyTorch | 2.0+ | CUDA 后端 (可选, 仅 NVIDIA, 需 CUDA 版安装) |
+| TensorRT | 8.6+ | TensorRT 后端 (可选, 仅 NVIDIA, 不支持 macOS) |

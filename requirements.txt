@@ -1,26 +1,26 @@
-# ===== 核心推理框架 =====
-ultralytics>=8.4.0          # YOLO26 模型管理、导出、推理
-openvino>=2024.0.0          # Intel OpenVINO 推理引擎 (支持 Arc GPU / NPU)
-                            # 最新版: 2026.3.0 (开发) / 2025.4.1 (维护)
-                            # 安装: pip install openvino>=2024.0.0
+# ===== 核心依赖 (必装) =====
+# 安装: pip install -r requirements.txt
+#
+# 如需使用 NVIDIA GPU (CUDA/TensorRT) 后端,
+# 另请安装: pip install -r requirements-optional.txt
 
-# ===== 视频采集与图像处理 =====
-opencv-python>=4.9.0        # UVC 摄像头取流、图像处理 (跨平台)
+# 推理框架
+ultralytics>=8.4.0          # YOLO26 模型管理、导出、推理
+openvino>=2024.0.0          # Intel OpenVINO 推理引擎
+                             # 最新正式版: 2026.2.1 (2026-06-17)
+                             # 安装: pip install openvino
+
+# 视频采集与图像处理
+opencv-python>=4.9.0        # UVC 摄像头取流 (跨平台: Windows/Linux/macOS)
 numpy>=1.24.0               # 数组运算
 
-# ===== 可选: 模型量化与优化 =====
+# 模型导出 (ONNX 中间格式)
 onnx>=1.15.0                # ONNX 中间格式 (导出中间步骤)
-onnxruntime>=1.17.0         # ONNX Runtime (可选，用于对比基准)
+onnxruntime>=1.17.0         # ONNX Runtime (可选, 用于对比基准)
 
-# ===== 可选: NVIDIA GPU 支持 (H-02) =====
-# 如需使用 CUDA/TensorRT 后端, 取消以下注释并安装 CUDA 版 PyTorch
-# torch>=2.0.0               # PyTorch (CUDA 版)
-# tensorrt>=8.6.0            # NVIDIA TensorRT (仅 Linux/Windows + NVIDIA GPU)
-
-# ===== 可选: 日志与工具 =====
-tqdm>=4.66.0                # 进度条
+# 系统监控与进度
 psutil>=5.9.0              # 系统资源监控 (CPU/内存使用率)
+tqdm>=4.66.0               # 进度条
 
-# ===== 测试框架 (H-03) =====
+# ===== 测试框架 (开发用, 运行测试时需要) =====
 pytest>=8.0.0               # 单元测试框架
-pytest-cov>=4.1.0           # 测试覆盖率统计

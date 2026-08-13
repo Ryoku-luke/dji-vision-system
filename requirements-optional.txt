@@ -1,0 +1,24 @@
+# ===== 可选依赖: NVIDIA CUDA/TensorRT 后端 (H-08) =====
+# 仅在使用 CUDA 或 TensorRT 推理后端时需要安装
+# 安装方式: pip install -r requirements-optional.txt
+#
+# 注意: PyTorch 必须安装 CUDA 版本, 请参考 https://pytorch.org/get-started/locally/
+#   例如 CUDA 12.1: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# TensorRT 仅支持 Linux 和 Windows, 不支持 macOS
+
+# PyTorch (CUDA 版, 必须从 CUDA 索引安装)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# NVIDIA TensorRT (仅 Linux/Windows + NVIDIA GPU)
+# 安装前需先安装 CUDA 和 cuDNN
+tensorrt>=8.6.0
+
+# ===== 可选依赖: 开发工具 =====
+# 代码质量检查 (CI/CD 使用)
+pylint>=3.0.0
+mypy>=1.8.0
+
+# 测试覆盖率
+pytest-cov>=4.1.0
