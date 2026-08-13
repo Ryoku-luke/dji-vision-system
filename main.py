@@ -84,7 +84,7 @@ class VisionSystem:
         """初始化所有组件"""
         logger.info("=" * 60)
         logger.info("  DJI 运动相机视觉识别系统")
-        logger.info("  Intel Core Ultra 7 155H + OpenVINO + YOLO")
+        logger.info(f"  后端: {MODEL.backend.upper()} | YOLO + {'OpenVINO' if MODEL.backend == 'openvino' else 'CUDA' if MODEL.backend == 'cuda' else 'TensorRT'}")
         logger.info("=" * 60)
 
         # 1. 加载推理模型
@@ -378,7 +378,7 @@ def main():
         """,
     )
     parser.add_argument("--device", type=str, default=None,
-                        help="推理设备 (intel:gpu / intel:npu / intel:cpu)")
+                        help="推理设备 (OpenVINO: intel:gpu/intel:cpu | CUDA: 0/cpu)")
     parser.add_argument("--confidence", type=float, default=None,
                         help="置信度阈值 (默认: 0.5)")
     parser.add_argument("--iou", type=float, default=None,

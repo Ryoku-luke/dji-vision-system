@@ -1,18 +1,18 @@
 """
 目标检测模块
 ====================
-基于 OpenVINO + YOLO 的目标检测推理引擎
+基于 YOLO 的目标检测推理引擎 (H-02: 多后端支持)
 
 核心流程:
-  1. 加载导出后的 OpenVINO 模型
+  1. 加载导出后的模型 (OpenVINO / CUDA / TensorRT)
   2. 接收 BGR 图像帧
   3. 预处理 (resize + normalize) -> 推理 -> 后处理 (NMS)
   4. 返回检测结果 (边界框、类别、置信度)
 
-支持设备:
-  - "intel:gpu"  -> Arc 集成 GPU (推荐, 155H 实测最快)
-  - "intel:npu"  -> NPU (155H 兼容性有限)
-  - "intel:cpu"  -> 纯 CPU
+支持后端:
+  - OpenVINO: "intel:gpu" / "intel:npu" / "intel:cpu" (Intel 平台)
+  - CUDA:     "0" / "cpu" (NVIDIA 平台)
+  - TensorRT: "0" (NVIDIA 平台, 最快)
 """
 
 import time
@@ -104,7 +104,7 @@ class OpenVINODetector:
 
     def load(self) -> bool:
         """
-        加载 OpenVINO 模型
+        加载模型 (H-02: 支持多后端)
 
         Returns:
             True 如果加载成功
@@ -117,7 +117,7 @@ class OpenVINODetector:
             return False
 
         logger.info(f"加载模型: {self.model_path}")
-        logger.info(f"推理设备: {self.device}")
+        logger.info(f"推理后端: {MODEL.backend} | 设备: {self.device}")
 
         self.model = YOLO(str(self.model_path))
 
@@ -129,17 +129,31 @@ class OpenVINODetector:
             logger.info("模型加载成功, 设备验证通过")
         except Exception as e:
             logger.warning(f"设备 {self.device} 验证失败: {e}")
-            logger.warning("回退到 CPU 模式")
-            self.device = "intel:cpu"
+            # H-02: 根据后端选择回退设备
+            fallback = self._get_fallback_device()
+            if fallback is None:
+                logger.error("无可用的回退设备")
+                return False
+            logger.warning(f"回退到 {fallback}")
+            self.device = fallback
             try:
                 self.model.predict(dummy, device=self.device, verbose=False)
-                logger.info("已回退到 CPU 模式")
+                logger.info(f"已回退到 {fallback}")
             except Exception as e2:
-                logger.error(f"CPU 模式验证也失败: {e2}")
+                logger.error(f"回退设备 {fallback} 验证也失败: {e2}")
                 return False
 
         self._is_loaded = True
         return True
+
+    def _get_fallback_device(self) -> str:
+        """根据当前后端选择回退设备"""
+        if MODEL.backend == "openvino":
+            return "intel:cpu"
+        elif MODEL.backend in ("cuda", "tensorrt"):
+            return "cpu"
+        else:
+            return "cpu"
 
     def detect(self, frame: np.ndarray) -> DetectionResult:
         """

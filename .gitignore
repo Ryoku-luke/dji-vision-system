@@ -36,3 +36,9 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 测试覆盖率 (H-03)
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/

@@ -1,8 +1,10 @@
 # DJI 运动相机视觉识别系统
 
-基于 **DJI Osmo Action 运动相机** + **Intel Core Ultra 7 155H** + **OpenVINO + YOLO** 的实时目标检测系统。
+基于 **DJI Osmo Action 运动相机** + **OpenVINO + YOLO** 的跨平台实时目标检测系统。
 
-利用 DJI 运动相机的 UVC 网络摄像头模式采集视频，通过 Intel Arc 集成 GPU 进行 OpenVINO INT8 加速推理，实现 80 类目标的实时检测，推理速度最高可达 **97 FPS**（yolo26s INT8）。
+利用 DJI 运动相机的 UVC 网络摄像头模式采集视频，通过 OpenVINO INT8 加速推理（支持 Intel Arc GPU / NVIDIA CUDA / TensorRT 多后端），实现 80 类目标的实时检测，推理速度最高可达 **97 FPS**（yolo26s INT8, Intel Arc GPU）。
+
+支持 **Windows / Linux / macOS** 三大平台，内置 65 个自动化单元测试和 GitHub Actions CI/CD 流水线。
 
 ---
 
@@ -10,6 +12,8 @@
 
 - [系统架构](#系统架构)
 - [功能清单](#功能清单)
+- [跨平台支持](#跨平台支持)
+- [多后端推理](#多后端推理)
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
 - [环境搭建步骤](#环境搭建步骤)
@@ -17,6 +21,9 @@
 - [项目结构](#项目结构)
 - [配置说明](#配置说明)
 - [性能优化建议](#性能优化建议)
+- [自动化测试](#自动化测试)
+- [CI/CD 流水线](#cicd-流水线)
+- [模型分发](#模型分发)
 - [常见问题](#常见问题)
 - [BUG 修复测试报告](#bug-修复测试报告)
 - [技术栈版本](#技术栈版本)
@@ -150,6 +157,52 @@ DJI Action 相机 (UVC 模式)          视频文件 (MP4/AVI)
 
 ---
 
+## 跨平台支持
+
+系统自动检测操作系统并选择对应的摄像头采集后端（H-01），无需手动配置：
+
+| 平台 | OpenCV 后端 | 常量 | 说明 |
+|------|------------|------|------|
+| Windows | MSMF | `700` | Media Foundation，兼容性最佳 |
+| Linux | V4L2 | `200` | Video4Linux2，标准 UVC 驱动 |
+| macOS | AVFoundation | `1200` | Apple 原生框架 |
+| 其他 | AUTO | `0` | OpenCV 自动选择 |
+
+```python
+# config.py 中的自动检测逻辑
+def _detect_api_backend() -> int:
+    system = platform.system()
+    if system == "Windows":   return 700   # CAP_MSMF
+    elif system == "Linux":   return 200   # CAP_V4L2
+    elif system == "Darwin":  return 1200  # CAP_AVFOUNDATION
+    else:                     return 0     # CAP_ANY
+```
+
+如需手动指定后端，修改 `config.py` 中 `CameraConfig.api_preference` 即可。
+
+---
+
+## 多后端推理
+
+系统支持三种推理后端（H-02），通过 `config.py` 中 `ModelConfig.backend` 切换：
+
+| 后端 | 配置值 | 设备示例 | 适用平台 | 说明 |
+|------|--------|---------|---------|------|
+| OpenVINO | `"openvino"` | `intel:gpu` / `intel:cpu` | Intel | 默认，支持 INT8 量化，Arc GPU 最快 |
+| CUDA | `"cuda"` | `0` / `cpu` | NVIDIA | 需 CUDA 版 PyTorch，直接加载 .pt 模型 |
+| TensorRT | `"tensorrt"` | `0` | NVIDIA | 最快推理，需导出 TensorRT 引擎 |
+
+```python
+# config.py 切换后端
+MODEL.backend = "openvino"     # Intel 平台 (默认)
+MODEL.backend = "cuda"         # NVIDIA GPU
+MODEL.backend = "tensorrt"     # NVIDIA TensorRT
+```
+
+**设备回退机制**: GPU 验证失败时自动回退到 CPU，CUDA/TensorRT 回退到 `"cpu"`，OpenVINO 回退到 `"intel:cpu"`。
+
+---
+
 ## 环境要求
 
 ### 硬件
@@ -182,15 +235,22 @@ cd dji-vision-system
 # 2. 创建虚拟环境
 python -m venv venv
 venv\Scripts\Activate.ps1    # Windows PowerShell
+source venv/bin/activate     # Linux/macOS
 
 # 3. 安装依赖
 pip install -r requirements.txt
 
-# 4. 导出模型 (首次必须, 需联网下载校准数据)
+# 4. 获取模型 (二选一)
+#   方式 A: 下载预导出模型 (推荐, 快速)
+python download_model.py
+#   方式 B: 手动导出 (完整流程, 需联网校准)
 python export_model.py
 
 # 5. 连接 DJI 相机 (UVC 模式) 并启动
 python main.py
+
+# 6. 运行测试 (可选)
+python -m pytest tests/ -v
 ```
 
 > 首次导出 INT8 模型会自动下载 COCO128 校准数据集，耗时约 5-15 分钟。
@@ -391,17 +451,27 @@ python main.py --input video.mp4 --classes person,car --flip --save --log-detect
 
 ```
 dji-vision-system/
-├── config.py              # 全局配置 (摄像头/模型/显示参数)
+├── config.py              # 全局配置 (摄像头/模型/显示参数, 跨平台后端检测)
 ├── export_model.py        # 模型导出脚本 (PyTorch → OpenVINO INT8)
-├── camera_capture.py      # UVC 摄像头采集模块
-├── detector.py            # OpenVINO YOLO 推理引擎
-├── visualizer.py          # 可视化模块 (绘制框/FPS/信息面板)
+├── download_model.py      # 预导出模型下载脚本 (H-05, 从 GitHub Release 下载)
+├── camera_capture.py      # UVC 摄像头采集模块 (跨平台: Windows/Linux/macOS)
+├── detector.py            # YOLO 推理引擎 (多后端: OpenVINO/CUDA/TensorRT)
+├── visualizer.py          # 可视化模块 (绘制框/FPS/信息面板/镜像)
 ├── main.py                # 主程序入口
 ├── requirements.txt       # Python 依赖
 ├── README.md              # 本文件
+├── .github/
+│   └── workflows/
+│       └── ci.yml         # GitHub Actions CI/CD (H-04, 语法检查/测试/代码质量)
+├── tests/                 # 自动化测试 (H-03, 65 个 pytest 用例)
+│   ├── conftest.py        # 测试 fixtures
+│   ├── test_config.py     # 配置模块测试
+│   ├── test_detector.py   # 检测器测试 (含 BUG-01 回归)
+│   ├── test_camera_capture.py  # 摄像头测试 (含 BUG-08 回归)
+│   └── test_main.py       # 主程序工具函数测试
 ├── models/                # 模型文件目录 (自动创建, 已 gitignore)
 │   ├── yolo26s.pt         # 原始 PyTorch 模型
-│   └── exported/          # 导出后的 OpenVINO 模型
+│   └── exported/          # 导出后的模型
 │       └── yolo26s_int8_openvino_model/
 └── output/                # 输出目录 (自动创建, 已 gitignore)
     ├── screenshots/       # 截图
@@ -503,6 +573,100 @@ class DisplayConfig:
 - 长时间运行时垫高笔记本底部, 确保通风
 - 可使用散热底座辅助降温
 - 如频繁降频, 可在电源管理中设置"最佳性能"模式
+
+---
+
+## 自动化测试
+
+项目内置 **65 个 pytest 单元测试**（H-03），覆盖核心模块的参数处理、异常捕获、分辨率同步、设备回退等逻辑，防止代码回归。
+
+### 运行测试
+
+```bash
+# 运行全部测试
+python -m pytest tests/ -v
+
+# 运行并生成覆盖率报告
+python -m pytest tests/ -v --cov=. --cov-report=term-missing
+
+# 仅运行特定模块的测试
+python -m pytest tests/test_config.py -v
+python -m pytest tests/test_detector.py -v
+```
+
+### 测试覆盖
+
+| 测试文件 | 用例数 | 覆盖内容 |
+|---------|:------:|---------|
+| `test_config.py` | 16 | CameraConfig 默认值/平台检测、ModelConfig 路径生成/后端切换、DisplayConfig、COCO 80 类 |
+| `test_detector.py` | 19 | Detection 几何属性、DetectionResult FPS 计算/过滤、BUG-01 回归测试 |
+| `test_camera_capture.py` | 15 | BUG-08 回归测试 (falsy 判断)、视频文件模式、上下文管理器 |
+| `test_main.py` | 15 | `parse_classes()` 名称/ID/混合解析、边界情况 |
+
+### BUG 回归测试
+
+测试中包含关键 BUG 的回归测试，确保已修复的问题不会复发：
+
+- **BUG-01 回归**: `OpenVINODetector` 传入 `conf_threshold=0.0` 时不被覆盖为默认值
+- **BUG-08 回归**: `CameraCapture` 传入 `width=0` / `fps=0` 时不被覆盖为默认值
+
+---
+
+## CI/CD 流水线
+
+项目配置了 GitHub Actions CI/CD 流水线（H-04），每次推送到 `main` 分支或创建 PR 时自动运行：
+
+| 作业 | 说明 | 失败处理 |
+|------|------|---------|
+| `syntax-check` | 对所有 `.py` 文件运行 `py_compile` 语法检查 | 阻塞（硬性要求） |
+| `unit-tests` | 运行 `pytest tests/ -v --cov` 并上传覆盖率报告 | 非阻塞（初始阶段） |
+| `code-quality` | 运行 `pylint`（阈值 6.0）和 `mypy` 类型检查 | 非阻塞（初始阶段） |
+
+配置文件: `.github/workflows/ci.yml`
+
+---
+
+## 模型分发
+
+为降低首次使用门槛（H-05），项目提供两种获取模型的方式：
+
+### 方式一：下载预导出模型（推荐）
+
+```bash
+# 下载默认模型 (yolo26s INT8 OpenVINO)
+python download_model.py
+
+# 指定模型
+python download_model.py --model yolo26n
+
+# 列出可用模型
+python download_model.py --list
+
+# 覆盖已存在的模型
+python download_model.py --force
+```
+
+预导出模型托管在 GitHub Release，无需联网校准，下载后即可使用。
+
+### 方式二：手动导出（完整流程）
+
+```bash
+# 导出 INT8 模型 (需下载校准数据, 耗时约 5-15 分钟)
+python export_model.py
+
+# 导出后运行基准测试
+python export_model.py --benchmark
+```
+
+### 可用模型
+
+| 模型 | INT8 大小 | 推理速度 | 适用场景 |
+|------|----------|---------|---------|
+| yolo26n | ~6 MB | ~170 fps | 速度优先 |
+| yolo26s | ~10 MB | ~97 fps | **推荐** |
+| yolo26m | ~25 MB | ~63 fps | 精度优先 |
+| yolo26l | ~43 MB | ~49 fps | 高精度 |
+| yolo26x | ~68 MB | ~28 fps | 最高精度 |
 
 ---
 
@@ -869,10 +1033,13 @@ class DisplayConfig:
 
 ## 技术栈版本
 
-| 组件 | 版本 |
-|------|------|
-| Python | 3.11+ |
-| OpenVINO | 2026.1+ |
-| Ultralytics | 8.4+ |
-| OpenCV | 4.9+ |
-| NumPy | 1.24+ |
+| 组件 | 版本 | 说明 |
+|------|------|------|
+| Python | 3.10+ | 推荐 3.11 或 3.12 |
+| OpenVINO | 2024.0+ | 最新 2026.3.0 (开发) / 2025.4.1 (维护) |
+| Ultralytics | 8.4+ | YOLO26 模型管理 |
+| OpenCV | 4.9+ | 跨平台 UVC 采集 |
+| NumPy | 1.24+ | 数组运算 |
+| pytest | 8.0+ | 单元测试 (可选) |
+| PyTorch | 2.0+ | CUDA 后端 (可选, 仅 NVIDIA) |
+| TensorRT | 8.6+ | TensorRT 后端 (可选, 仅 NVIDIA) |
