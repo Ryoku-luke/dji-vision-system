@@ -91,11 +91,13 @@ class OpenVINODetector:
         device: str = None,
         conf_threshold: float = None,
         iou_threshold: float = None,
+        classes: list[int] = None,
     ):
         self.model_path = model_path if model_path is not None else MODEL.exported_path
         self.device = device if device is not None else MODEL.inference_device
         self.conf_threshold = conf_threshold if conf_threshold is not None else MODEL.conf_threshold
         self.iou_threshold = iou_threshold if iou_threshold is not None else MODEL.iou_threshold
+        self.classes = classes  # None = 检测所有类别, list = 仅检测指定类别
 
         self.model = None
         self._is_loaded = False
@@ -156,14 +158,23 @@ class OpenVINODetector:
         # 执行推理
         start_time = time.perf_counter()
 
-        results = self.model.predict(
-            frame,
-            device=self.device,
-            conf=self.conf_threshold,
-            iou=self.iou_threshold,
-            imgsz=MODEL.imgsz,
-            verbose=False,
-        )
+        # BUG-10 修复: 捕获推理异常, 避免单帧失败导致程序崩溃
+        try:
+            predict_kwargs = {
+                "device": self.device,
+                "conf": self.conf_threshold,
+                "iou": self.iou_threshold,
+                "imgsz": MODEL.imgsz,
+                "verbose": False,
+            }
+            # 类别过滤: 仅在指定 classes 时传入
+            if self.classes is not None:
+                predict_kwargs["classes"] = self.classes
+
+            results = self.model.predict(frame, **predict_kwargs)
+        except Exception as e:
+            logger.error(f"推理失败: {e}")
+            return DetectionResult([], 0.0, frame.shape[:2])
 
         inference_ms = (time.perf_counter() - start_time) * 1000
 
@@ -195,14 +206,22 @@ class OpenVINODetector:
 
         start_time = time.perf_counter()
 
-        results = self.model.predict(
-            frames,
-            device=self.device,
-            conf=self.conf_threshold,
-            iou=self.iou_threshold,
-            imgsz=MODEL.imgsz,
-            verbose=False,
-        )
+        # BUG-10 修复: 批量推理也添加异常捕获
+        try:
+            predict_kwargs = {
+                "device": self.device,
+                "conf": self.conf_threshold,
+                "iou": self.iou_threshold,
+                "imgsz": MODEL.imgsz,
+                "verbose": False,
+            }
+            if self.classes is not None:
+                predict_kwargs["classes"] = self.classes
+
+            results = self.model.predict(frames, **predict_kwargs)
+        except Exception as e:
+            logger.error(f"批量推理失败: {e}")
+            return [DetectionResult([], 0.0, f.shape[:2]) for f in frames]
 
         total_ms = (time.perf_counter() - start_time) * 1000
         avg_ms = total_ms / len(frames)

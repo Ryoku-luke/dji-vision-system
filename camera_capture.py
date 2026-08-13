@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class CameraCapture:
-    """UVC 摄像头采集器"""
+    """UVC 摄像头采集器 / 视频文件读取器"""
 
     def __init__(
         self,
@@ -29,22 +29,49 @@ class CameraCapture:
         width: int = None,
         height: int = None,
         fps: int = None,
+        source: str = None,
     ):
-        self.device_index = device_index if device_index is not None else CAMERA.device_index
-        self.width = width or CAMERA.width
-        self.height = height or CAMERA.height
-        self.fps = fps or CAMERA.fps
+        """
+        初始化采集器
+
+        Args:
+            device_index: UVC 设备索引 (默认使用 config)
+            width: 采集分辨率宽度
+            height: 采集分辨率高度
+            fps: 采集帧率
+            source: 视频文件路径 (指定后忽略 device_index, 从文件读取)
+        """
+        self.source = source
+        self._is_file = source is not None
+
+        if self._is_file:
+            self.device_index = -1
+            self.width = 0
+            self.height = 0
+            self.fps = 0
+        else:
+            self.device_index = device_index if device_index is not None else CAMERA.device_index
+            self.width = width if width is not None else CAMERA.width
+            self.height = height if height is not None else CAMERA.height
+            self.fps = fps if fps is not None else CAMERA.fps
 
         self.cap = None
         self._is_running = False
 
     def open(self) -> bool:
         """
-        打开摄像头设备
+        打开摄像头设备或视频文件
 
         Returns:
             True 如果成功打开
         """
+        if self._is_file:
+            return self._open_file()
+        else:
+            return self._open_camera()
+
+    def _open_camera(self) -> bool:
+        """打开 UVC 摄像头设备"""
         logger.info(f"正在打开 UVC 摄像头 (设备索引: {self.device_index})...")
 
         # 使用 MSMF 后端 (Windows 推荐)
@@ -70,11 +97,45 @@ class CameraCapture:
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
 
-        logger.info(f"摄像头已打开: {actual_w}x{actual_h} @ {actual_fps:.0f}fps")
+        # BUG-11 修复: 某些相机不报告 FPS, 实际值为 0.0
+        fps_display = f"{actual_fps:.0f}" if actual_fps > 0 else "N/A"
+        logger.info(f"摄像头已打开: {actual_w}x{actual_h} @ {fps_display}fps")
 
         if actual_w != self.width or actual_h != self.height:
             logger.warning(f"请求 {self.width}x{self.height}, 实际 {actual_w}x{actual_h}"
                           f" (部分相机不支持自定义分辨率)")
+
+        # 更新为实际值, 供后续模块使用
+        self.width = actual_w
+        self.height = actual_h
+        if actual_fps > 0:
+            self.fps = int(actual_fps)
+
+        self._is_running = True
+        return True
+
+    def _open_file(self) -> bool:
+        """打开视频文件"""
+        from pathlib import Path
+
+        file_path = Path(self.source)
+        if not file_path.exists():
+            logger.error(f"视频文件不存在: {self.source}")
+            return False
+
+        logger.info(f"正在打开视频文件: {self.source}...")
+        self.cap = cv2.VideoCapture(str(file_path))
+
+        if not self.cap.isOpened():
+            logger.error(f"无法打开视频文件: {self.source}")
+            return False
+
+        self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.fps = int(self.cap.get(cv2.CAP_PROP_FPS)) or 30
+
+        frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        logger.info(f"视频已打开: {self.width}x{self.height} @ {self.fps}fps, 共 {frame_count} 帧")
 
         self._is_running = True
         return True

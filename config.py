@@ -86,9 +86,13 @@ class DisplayConfig:
     show_class_name: bool = True         # 显示类别名称
     box_thickness: int = 2               # 边界框线宽
     font_scale: float = 0.6             # 字体大小
+    mirror: bool = False                # 画面水平镜像 (相机倒装时使用)
     save_output: bool = False            # 是否保存输出视频
     output_path: Path = Path("output/result.mp4")
     output_fps: int = 30
+    # 检测结果日志
+    log_detections: bool = False         # 是否记录检测结果到 CSV
+    log_path: Path = Path("output/detections.csv")
 
 
 # ============================================================

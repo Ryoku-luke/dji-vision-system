@@ -26,23 +26,24 @@
 ## 系统架构
 
 ```
-DJI Action 相机 (UVC 模式)
-        │ Type-C USB
-        ▼
-┌───────────────────────────────────────────┐
-│  Intel Core Ultra 7 155H 笔记本            │
-│                                           │
-│  ┌──────────┐   ┌──────────┐   ┌────────┐ │
-│  │ OpenCV   │──▶│ YOLO26   │──▶│ 可视化  │ │
-│  │ UVC取流  │   │ OpenVINO │   │ 输出    │ │
-│  │          │   │ Arc GPU  │   │        │ │
-│  └──────────┘   └──────────┘   └────────┘ │
-│                                           │
+DJI Action 相机 (UVC 模式)          视频文件 (MP4/AVI)
+        │ Type-C USB                       │
+        ▼                                  │
+┌──────────────────────────┐               │
+│  Intel Core Ultra 7 155H │◀──────────────┘
+│  笔记本                   │
+│                          │
+│  ┌──────────┐  ┌──────────┐  ┌────────┐  │
+│  │ OpenCV   │─▶│ YOLO26   │─▶│ 可视化  │  │
+│  │ 取流     │  │ OpenVINO │  │ 输出    │  │
+│  │          │  │ Arc GPU  │  │        │  │
+│  └──────────┘  └──────────┘  └────────┘  │
+│                          │               │
 │  32GB DDR5 | Intel Arc GPU | NPU         │
-└───────────────────────────────────────────┘
+└──────────────────────────────────────────┘
 ```
 
-**数据流**: 相机取流 (OpenCV) → 目标检测 (YOLO + OpenVINO) → 结果可视化 (OpenCV 绘制) → 实时显示 / 视频保存
+**数据流**: 视频源 (UVC 摄像头 / 视频文件) → 目标检测 (YOLO + OpenVINO) → 结果可视化 (OpenCV 绘制) → 实时显示 / 视频保存 / CSV 日志
 
 ---
 
@@ -65,8 +66,11 @@ DJI Action 相机 (UVC 模式)
 | 功能 | 说明 | API |
 |------|------|-----|
 | UVC 设备打开 | 通过 OpenCV VideoCapture + MSMF 后端连接 DJI 相机 | `open()` |
+| 视频文件输入 | 支持从 MP4/AVI 等视频文件读取帧，用于离线分析 | `source="video.mp4"` |
 | 分辨率 / 帧率配置 | 可配置 1920x1080 @ 30fps，自动设置 `CAP_PROP_*` 参数 | 构造函数参数 |
 | 分辨率不匹配警告 | 实际分辨率与请求值不一致时输出 warning 日志 | `open()` 内置 |
+| 实际分辨率同步 | 打开后自动更新 width/height/fps 为相机实际值 | `open()` 内置 |
+| FPS 为 0 处理 | 某些相机不报告 FPS，显示 "N/A" 而非 "0" | `open()` 内置 |
 | 缓冲帧优化 | `buffer_size=1` 最大限度降低取流延迟 | `config.py` 配置 |
 | 单帧读取 | 返回 BGR 格式图像帧，读取失败返回 `None` | `read()` |
 | 批量读取 | 连续读取多帧，用于预热或批量处理 | `read_batch(count)` |
@@ -83,7 +87,9 @@ DJI Action 相机 (UVC 模式)
 | GPU → CPU 自动回退 | GPU 验证失败时自动回退到 CPU，CPU 也失败则返回 `False` | `load()` 内置 |
 | 单帧检测 | 返回 `DetectionResult`（含边界框、置信度、类别、推理耗时） | `detect(frame)` |
 | 批量检测 | 利用 OpenVINO 批量推理优化，返回多帧结果 | `detect_batch(frames)` |
-| 按类别过滤 | 从检测结果中筛选指定类别的目标 | `filter_by_class(class_ids)` |
+| 推理异常防护 | 单帧推理失败时返回空结果，不中断主循环 | `detect()` 内置 |
+| 类别过滤 (推理级) | 推理时仅检测指定类别，减少后处理开销 | `classes=[0, 2]` |
+| 按类别过滤 (后处理) | 从检测结果中筛选指定类别的目标 | `filter_by_class(class_ids)` |
 | 按置信度过滤 | 从检测结果中筛选高于阈值的目标 | `filter_by_confidence(threshold)` |
 | 检测结果属性 | `Detection` 提供 `bbox` / `width` / `height` / `center` 属性 | 属性访问 |
 | 纯推理 FPS 计算 | 基于推理耗时计算纯推理 FPS（不含取流和后处理） | `DetectionResult.fps` |
@@ -100,6 +106,7 @@ DJI Action 相机 (UVC 模式)
 | FPS 计数器 | 30 帧滑动窗口平均，避免数值跳动 | `FPSCounter` 类 |
 | 信息面板 | 左上角半透明面板显示 FPS / 推理耗时 / 检测目标数 / CPU / 内存 | `draw()` 内置 |
 | 额外信息扩展 | 接受 `extra_info` 字典，支持显示自定义键值对 | `draw(frame, result, extra_info)` |
+| 画面水平镜像 | 支持水平翻转画面，适用于相机倒装场景 | `draw(mirror=True)` |
 | FPS 重置 | 暂停后恢复时重置计数器 | `reset_fps()` |
 | 视频写入 | MP4V 编码输出，自动读取摄像头实际分辨率 | `VideoWriter` 类 |
 | 截图保存 | 按键保存当前帧到 `output/screenshots/` | `main.py` 中 `_save_screenshot()` |
@@ -118,9 +125,16 @@ DJI Action 相机 (UVC 模式)
 | 退出总结 | 关闭时输出总帧数 / 总耗时 / 平均 FPS | 自动输出 |
 | 无显示模式 | 仅推理不显示窗口，用于性能测试 | `--no-display` |
 | 视频保存模式 | 将检测结果写入 `output/result.mp4` | `--save` |
+| 视频文件输入 | 从视频文件读取帧进行推理，播放完毕自动退出 | `--input video.mp4` |
+| 类别过滤 | 仅检测指定类别（支持名称或 ID），减少无关输出 | `--classes person,car` |
+| IoU 阈值调整 | 覆盖配置文件中的 NMS IoU 阈值 | `--iou 0.7` |
+| 画面镜像 | 水平翻转画面，适用于相机倒装场景 | `--flip` |
+| 检测结果日志 | 将每帧检测结果记录到 CSV 文件 | `--log-detections` |
 | 指定推理设备 | 覆盖配置文件中的推理设备 | `--device intel:cpu` |
 | 指定置信度 | 覆盖配置文件中的置信度阈值 | `--confidence 0.7` |
 | 列出摄像头 | 列出可用 UVC 设备索引 | `--list-cameras` |
+| 视频文件结束检测 | 播放视频文件时到达末尾自动退出 | 自动检测 |
+| 摄像头断连检测 | 连续丢帧超过 30 次时自动退出 | 自动检测 |
 | 模型缺失检测 | 启动前检查模型文件是否存在，提示运行导出脚本 | 自动检查 |
 | 优雅退出 | `Ctrl+C` 中断信号捕获 + 资源自动释放 | `Ctrl+C` |
 
@@ -131,7 +145,7 @@ DJI Action 相机 (UVC 模式)
 | 摄像头配置 | 设备索引 / 分辨率 / 帧率 / 缓冲区大小 / API 后端 |
 | 模型配置 | 模型名称 / 导出格式 / 输入尺寸 / INT8 / FP16 开关 / NMS / 校准数据 / 推理设备 / 置信度 / IoU |
 | 路径自动计算 | `model_path` 和 `exported_path` 属性根据精度自动生成路径 |
-| 显示配置 | 窗口开关 / FPS 显示 / 置信度显示 / 类别名显示 / 框线宽 / 字体大小 / 输出路径 |
+| 显示配置 | 窗口开关 / FPS 显示 / 置信度显示 / 类别名显示 / 框线宽 / 字体大小 / 镜像 / 输出路径 / 检测日志 |
 | 全局实例 | `CAMERA` / `MODEL` / `DISPLAY` / `CLASSES` 四个全局单例 |
 
 ---
@@ -296,8 +310,8 @@ python main.py
 # 使用 CPU 推理 (兼容性最好)
 python main.py --device intel:cpu
 
-# 调整置信度阈值
-python main.py --confidence 0.7
+# 调整置信度阈值和 IoU 阈值
+python main.py --confidence 0.7 --iou 0.6
 
 # 保存输出视频
 python main.py --save
@@ -306,7 +320,46 @@ python main.py --save
 python main.py --no-display
 ```
 
-### 3. 键盘操作
+### 3. 视频文件推理
+
+```bash
+# 从视频文件读取 (离线分析)
+python main.py --input video.mp4
+
+# 视频文件 + 类别过滤 + 保存
+python main.py --input video.mp4 --classes person,car --save
+
+# 视频文件 + 检测日志
+python main.py --input video.mp4 --log-detections
+```
+
+### 4. 类别过滤
+
+```bash
+# 按名称过滤 (仅检测行人和车辆)
+python main.py --classes person,car
+
+# 按 ID 过滤 (COCO ID: 0=person, 2=car)
+python main.py --classes 0,2
+
+# 混合使用名称和 ID
+python main.py --classes person,2,truck
+```
+
+### 5. 其他选项
+
+```bash
+# 画面镜像 (相机倒装时使用)
+python main.py --flip
+
+# 检测结果记录到 CSV
+python main.py --log-detections
+
+# 组合使用
+python main.py --input video.mp4 --classes person,car --flip --save --log-detections
+```
+
+### 6. 键盘操作
 
 | 按键 | 功能 |
 |------|------|
@@ -314,14 +367,19 @@ python main.py --no-display
 | `s` | 截图保存到 `output/screenshots/` |
 | `r` | 重置 FPS 计数器 |
 
-### 4. CLI 参数速查
+### 7. CLI 参数速查
 
 | 脚本 | 参数 | 说明 |
 |------|------|------|
 | `main.py` | `--device` | 推理设备 (`intel:gpu` / `intel:npu` / `intel:cpu`) |
 | `main.py` | `--confidence` | 置信度阈值 (默认: 0.5) |
+| `main.py` | `--iou` | NMS IoU 阈值 (默认: 0.5) |
+| `main.py` | `--classes` | 仅检测指定类别, 逗号分隔 (如 `person,car,0`) |
+| `main.py` | `--input` | 视频文件路径 (指定后从文件读取, 而非摄像头) |
 | `main.py` | `--no-display` | 不显示实时画面窗口 |
 | `main.py` | `--save` | 保存输出视频到 `output/result.mp4` |
+| `main.py` | `--flip` | 画面水平镜像 (相机倒装时使用) |
+| `main.py` | `--log-detections` | 记录检测结果到 CSV 文件 (`output/detections.csv`) |
 | `main.py` | `--list-cameras` | 列出可用的摄像头设备 |
 | `export_model.py` | `--model` | 模型名称 (如 `yolo26s.pt`, `yolo26m.pt`) |
 | `export_model.py` | `--device` | 导出时使用的设备 (`cpu` 或 `0`) |
@@ -347,7 +405,8 @@ dji-vision-system/
 │       └── yolo26s_int8_openvino_model/
 └── output/                # 输出目录 (自动创建, 已 gitignore)
     ├── screenshots/       # 截图
-    └── result.mp4         # 输出视频
+    ├── result.mp4         # 输出视频
+    └── detections.csv     # 检测结果日志 (--log-detections)
 ```
 
 ---
@@ -404,9 +463,13 @@ class DisplayConfig:
     show_class_name: bool = True         # 显示类别名称
     box_thickness: int = 2               # 边界框线宽
     font_scale: float = 0.6             # 字体大小
+    mirror: bool = False                # 画面水平镜像 (相机倒装时使用)
     save_output: bool = False            # 是否保存输出视频
     output_path: Path = Path("output/result.mp4")
     output_fps: int = 30
+    # 检测结果日志
+    log_detections: bool = False         # 是否记录检测结果到 CSV
+    log_path: Path = Path("output/detections.csv")
 ```
 
 ### 模型选择参考 (155H 实测数据)
@@ -480,19 +543,19 @@ class DisplayConfig:
 
 ## BUG 修复测试报告
 
-> **测试日期**: 2026-08-13 | **提交**: `f36cb8f` | **通过率**: 100%
+> **测试日期**: 2026-08-13 | **提交**: `f36cb8f` (第一次) / 新提交 (第二次) | **通过率**: 100%
 
 ### 测试概览
 
-本次代码审查共发现 **7 个 BUG**（严重 2 / 中等 3 / 轻微 2），涉及 5 个源码文件。所有修复均通过 `py_compile` 语法验证和逻辑分析，代码已推送至 GitHub。
+两次代码审查共发现 **11 个 BUG**（严重 3 / 中等 5 / 轻微 3），涉及 5 个源码文件。所有修复均通过 `py_compile` 语法验证和逻辑分析，代码已推送至 GitHub。
 
 | 指标 | 数值 |
 |------|------|
-| 发现 BUG 总数 | 7 |
-| 已修复 BUG | 7 |
+| 发现 BUG 总数 | 11 |
+| 已修复 BUG | 11 |
 | 语法检查通过 | 6/6 |
 | 涉及文件数 | 5 |
-| 代码变更 | +37 行 / -18 行 |
+| 代码变更 | +127 行 / -38 行 |
 
 ### BUG 修复总览
 
@@ -505,6 +568,10 @@ class DisplayConfig:
 | BUG-05 | **中等** | `export_model.py` | benchmark 结果键名 `inference_time` 与实际返回的 `speed/inference` 不匹配 | 兼容多种键名 | PASS |
 | BUG-06 | **轻微** | `config.py` / `detector.py` / `visualizer.py` | 未使用的导入：`field`、`cv2`、`CLASSES` | 移除无用导入 | PASS |
 | BUG-07 | **轻微** | `detector.py` | CPU 回退推理失败时异常未捕获 | 添加 try-except 返回 False | PASS |
+| BUG-08 | **中等** | `camera_capture.py` | `width` / `height` / `fps` 使用 `or` 判断，传入 `0` 时被替换为默认值 | 改用 `is not None` 判断 | PASS |
+| BUG-09 | **中等** | `main.py` | 系统初始化日志显示配置分辨率而非摄像头实际分辨率 | 从 `camera.width/height` 读取实际值 | PASS |
+| BUG-10 | **严重** | `detector.py` | `detect()` 未捕获推理异常，单帧失败导致程序崩溃 | 添加 try-except 返回空结果 | PASS |
+| BUG-11 | **轻微** | `camera_capture.py` | 某些相机不报告 FPS（返回 0.0），日志显示 "0fps" | 检测 0 值并显示 "N/A" | PASS |
 
 ### BUG-01：falsy 判断导致参数被错误覆盖 [严重]
 
@@ -667,6 +734,99 @@ class DisplayConfig:
 +         return False
 ```
 
+### BUG-08：camera_capture 参数 falsy 判断 [中等]
+
+**问题描述**: `CameraCapture.__init__` 中 `width`、`height`、`fps` 使用 `or` 运算符提供默认值。与 BUG-01 同类问题，当传入 `width=0` 或 `fps=0` 时被替换为配置默认值。
+
+**测试用例**:
+
+| 用例 | 输入 | 修复前实际 | 修复后实际 | 结果 |
+|------|------|-----------|-----------|:----:|
+| TC-08a | `width=0` | 1920 (BUG) | 0 | PASS |
+| TC-08b | `width=None` | 1920 | 1920 | PASS |
+| TC-08c | `fps=0` | 30 (BUG) | 0 | PASS |
+
+**代码变更** (`camera_capture.py`):
+
+```diff
+- self.width = width or CAMERA.width
+- self.height = height or CAMERA.height
+- self.fps = fps or CAMERA.fps
++ self.width = width if width is not None else CAMERA.width
++ self.height = height if height is not None else CAMERA.height
++ self.fps = fps if fps is not None else CAMERA.fps
+```
+
+### BUG-09：初始化日志显示配置分辨率而非实际分辨率 [中等]
+
+**问题描述**: 系统初始化日志中 `分辨率: {CAMERA.width}x{CAMERA.height}` 显示的是配置文件中的请求分辨率，而非摄像头实际返回的分辨率。当相机不支持 1080P 时，日志与实际不符，误导用户。
+
+**测试用例**:
+
+| 用例 | 场景 | 修复前日志 | 修复后日志 | 结果 |
+|------|------|-----------|-----------|:----:|
+| TC-09a | 相机支持 1080P | 1920x1080 (巧合一致) | 1920x1080 | PASS |
+| TC-09b | 相机仅支持 720P | 1920x1080 (BUG) | 1280x720 | PASS |
+
+**代码变更** (`main.py`):
+
+```diff
+- logger.info(f"  分辨率: {CAMERA.width}x{CAMERA.height} @ {CAMERA.fps}fps")
++ source_type = "视频文件" if self.camera._is_file else "UVC 摄像头"
++ logger.info(f"  视频源: {source_type} ({self.camera.width}x{self.camera.height} @ {self.camera.fps}fps)")
+```
+
+### BUG-10：detect() 未捕获推理异常 [严重]
+
+**问题描述**: `OpenVINODetector.detect()` 方法直接调用 `self.model.predict()`，未包裹 try-except。如果推理过程中发生异常（如 GPU 驱动崩溃、内存不足），异常会传播到主循环导致程序崩溃。对于实时检测系统，单帧推理失败应跳过该帧而非终止整个程序。
+
+**测试用例**:
+
+| 用例 | 场景 | 修复前行为 | 修复后行为 | 结果 |
+|------|------|-----------|-----------|:----:|
+| TC-10a | 正常推理 | 正常 | 正常 | PASS |
+| TC-10b | GPU 临时故障 | 程序崩溃 (BUG) | 返回空结果, 继续运行 | PASS |
+| TC-10c | 批量推理异常 | 程序崩溃 (BUG) | 返回空结果列表 | PASS |
+
+**代码变更** (`detector.py`):
+
+```diff
+- results = self.model.predict(
+-     frame, device=self.device, conf=self.conf_threshold,
+-     iou=self.iou_threshold, imgsz=MODEL.imgsz, verbose=False,
+- )
++ try:
++     predict_kwargs = {
++         "device": self.device, "conf": self.conf_threshold,
++         "iou": self.iou_threshold, "imgsz": MODEL.imgsz, "verbose": False,
++     }
++     if self.classes is not None:
++         predict_kwargs["classes"] = self.classes
++     results = self.model.predict(frame, **predict_kwargs)
++ except Exception as e:
++     logger.error(f"推理失败: {e}")
++     return DetectionResult([], 0.0, frame.shape[:2])
+```
+
+### BUG-11：相机 FPS 为 0 时日志显示异常 [轻微]
+
+**问题描述**: 某些 DJI 相机在 UVC 模式下不报告帧率，`cap.get(CAP_PROP_FPS)` 返回 `0.0`。日志输出 `0fps` 不够友好，可能让用户误以为配置有误。
+
+**测试用例**:
+
+| 用例 | 相机 FPS 返回值 | 修复前日志 | 修复后日志 | 结果 |
+|------|---------------|-----------|-----------|:----:|
+| TC-11a | 30.0 | 30fps | 30fps | PASS |
+| TC-11b | 0.0 | 0fps (BUG) | N/A fps | PASS |
+
+**代码变更** (`camera_capture.py`):
+
+```diff
+- logger.info(f"摄像头已打开: {actual_w}x{actual_h} @ {actual_fps:.0f}fps")
++ fps_display = f"{actual_fps:.0f}" if actual_fps > 0 else "N/A"
++ logger.info(f"摄像头已打开: {actual_w}x{actual_h} @ {fps_display}fps")
+```
+
 ### 语法验证结果
 
 使用 Python 内置的 `py_compile` 模块对所有修改过的源码文件进行语法检查：
@@ -693,6 +853,10 @@ class DisplayConfig:
 | BUG-05 (benchmark 键名) | **中** | 影响性能基准测试输出，不影响推理功能 |
 | BUG-06 (未使用导入) | **低** | 无功能影响，仅代码整洁度问题 |
 | BUG-07 (异常未捕获) | **低** | 仅在极端环境（OpenVINO 安装异常）下触发，已添加防护 |
+| BUG-08 (camera falsy) | **中** | 与 BUG-01 同类，影响摄像头参数自定义 |
+| BUG-09 (分辨率日志) | **中** | 日志误导，不影响功能 |
+| BUG-10 (推理异常) | **高** | 单帧推理失败导致整个程序崩溃，实时系统中影响严重 |
+| BUG-11 (FPS 为 0) | **低** | 仅影响日志显示，不影响功能 |
 
 ### 后续建议
 

@@ -76,6 +76,7 @@ class Visualizer:
         frame: np.ndarray,
         result: DetectionResult,
         extra_info: dict = None,
+        mirror: bool = False,
     ) -> np.ndarray:
         """
         在帧上绘制检测结果
@@ -84,11 +85,16 @@ class Visualizer:
             frame: 原始 BGR 图像
             result: 检测结果
             extra_info: 额外显示信息 (如 {"系统CPU": "45%"})
+            mirror: 是否水平镜像画面
 
         Returns:
             绘制后的 BGR 图像
         """
         output = frame.copy()
+
+        # 画面水平镜像 (相机倒装时使用)
+        if mirror:
+            output = cv2.flip(output, 1)
 
         # 绘制检测框
         for det in result.detections:
