@@ -34,6 +34,7 @@ This system captures video through the UVC webcam mode of DJI action cameras and
 - [Automated Testing](#automated-testing)
 - [CI/CD Pipeline](#cicd-pipeline)
 - [Model Distribution](#model-distribution)
+- [Quick Troubleshooting](#quick-troubleshooting)
 - [FAQ](#faq)
 - [Bug Fix Test Report](#bug-fix-test-report)
 - [Tech Stack Versions](#tech-stack-versions)
@@ -202,7 +203,9 @@ This system captures video through the UVC webcam mode of DJI action cameras and
 
 | Feature | Description | CLI Parameter |
 |---------|-------------|---------------|
-| Download pre-exported model | Downloads a pre-exported OpenVINO INT8 model from GitHub Release, no manual calibration needed | `--model yolo26s` |
+| Download pre-exported model | Downloads a pre-exported model from GitHub Release, supports OpenVINO INT8 and CUDA .pt | `--model yolo26s --backend openvino` |
+| Multi-backend download | `--backend` specifies backend: openvino (INT8 .zip) / cuda (.pt) / tensorrt (export guidance) | `--backend cuda` |
+| SHA256 verification | Automatically verifies file SHA256 hash after download, ensuring integrity | Automatic |
 | List available models | Shows 5 models with name, size, inference speed, and use case | `--list` |
 | Overwrite existing model | Overwrites existing model files during download | `--force` |
 | Specify version | Downloads a specific Release version of the model | `--version v1.0.0` |
@@ -533,6 +536,7 @@ python main.py --input video.mp4 --classes person,car --flip --save --log-detect
 | `export_model.py` | `--device` | Device to use for export (`cpu` or `0`) |
 | `export_model.py` | `--benchmark` | Run benchmark after export |
 | `download_model.py` | `--model` | Model name (e.g. `yolo26s`, `yolo26m`, default: yolo26s) |
+| `download_model.py` | `--backend` | Inference backend: `openvino` (default) / `cuda` / `tensorrt` |
 | `download_model.py` | `--list` | List available models with size and inference speed |
 | `download_model.py` | `--force` | Overwrite existing model files |
 | `download_model.py` | `--version` | Specify a Release version (default: v1.0.0) |
@@ -558,14 +562,13 @@ dji-vision-system/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml         # GitHub Actions CI/CD (H-04, syntax check/tests/code quality)
-├── tests/                 # Automated tests (H-03/H-09, 106 pytest cases)
+├── tests/                 # Automated tests (106 pytest cases)
 │   ├── conftest.py        # Test fixtures (includes cv2 stub module)
-│   ├── test_config.py     # Config module tests (16 cases)
-│   ├── test_detector.py   # Detector tests (19 cases, includes BUG-01 regression)
+│   ├── test_config.py     # Config module tests (20 cases)
+│   ├── test_detector.py   # Detector tests (17 cases, includes BUG-01 regression)
 │   ├── test_camera_capture.py  # Camera tests (15 cases, includes BUG-08 regression)
-│   ├── test_main.py       # Main program utility function tests (15 cases)
-│   ├── test_backend.py    # Cross-platform backend & multi-backend inference tests (36 cases, H-09)
-│   └── test_messages.py   # i18n message module tests (5 cases)
+│   ├── test_main.py       # Main program utility function tests (13 cases)
+│   └── test_backend.py    # Cross-platform backend & multi-backend inference tests (41 cases)
 ├── models/                # Model file directory (auto-created, gitignored)
 │   ├── yolo26s.pt         # Original PyTorch model
 │   └── exported/          # Exported models
@@ -657,15 +660,20 @@ class DisplayConfig:
 | yolo26l | 20.31 ms | ~49 fps | High accuracy, near the limit |
 | yolo26x | 35.16 ms | ~28 fps | Highest accuracy, not real-time |
 
+> **About yolo26 naming**: yolo26n/s/m/l/x are based on the Ultralytics YOLO series. Weights are auto-downloaded by Ultralytics (`YOLO("yolo26s.pt")` fetches from the official repository on first run). n/s/m/l/x correspond to Nano/Small/Medium/Large/Extra Large sizes, with increasing parameters/accuracy and decreasing speed.
+
 ### Backend Performance Comparison Reference
 
 | Backend | Precision | Typical Inference Speed | Description |
 |---------|-----------|:-----------------------:|-------------|
 | OpenVINO (Intel Arc GPU) | INT8 | ~97 fps (yolo26s) | Optimal on Intel, INT8 quantization acceleration |
 | OpenVINO (Intel CPU) | INT8 | ~15-25 fps | Fallback when no GPU is available |
+| CUDA (NVIDIA RTX 4060) | FP16 | ~120-140 fps | Consumer GPU, FP16 acceleration, reference only |
+| CUDA (NVIDIA RTX 3060) | FP16 | ~80-100 fps | Consumer GPU, reference only |
 | CUDA (NVIDIA GPU) | FP32/FP16 | Varies by GPU model | Requires CUDA-enabled PyTorch, loads .pt directly |
+| TensorRT (NVIDIA RTX 4060) | INT8/FP16 | ~150-180 fps | Fastest inference, requires TensorRT engine export, reference only |
 | TensorRT (NVIDIA GPU) | INT8/FP16 | Fastest (varies by GPU model) | Requires TensorRT engine export, fastest inference |
-| OpenVINO (macOS) | INT8 | ~10-20 fps (CPU only) | OpenVINO supports CPU-only inference on macOS |
+| OpenVINO (macOS) | INT8 | ~10-20 fps (CPU only) | macOS only supports CPU inference, no GPU acceleration, performance depends on CPU cores |
 
 ---
 
@@ -726,12 +734,11 @@ python -m pytest tests/test_detector.py -v
 
 | Test File | Cases | Coverage |
 |-----------|:------:|----------|
-| `test_config.py` | 16 | CameraConfig defaults/platform detection, ModelConfig path generation/backend switching, DisplayConfig, COCO 80 classes |
-| `test_detector.py` | 19 | Detection geometry properties, DetectionResult FPS calculation/filtering, BUG-01 regression test |
+| `test_config.py` | 20 | CameraConfig defaults/platform detection, ModelConfig path generation/backend switching, DisplayConfig, COCO 80 classes |
+| `test_detector.py` | 17 | Detection geometry properties, DetectionResult FPS calculation/filtering, BUG-01 regression test |
 | `test_camera_capture.py` | 15 | BUG-08 regression test (falsy check), video file mode, context manager |
-| `test_main.py` | 15 | `parse_classes()` name ID/mixed parsing, edge cases |
-| `test_backend.py` | 36 | Cross-platform backend detection, multi-backend config paths, device fallback logic (H-09) |
-| `test_messages.py` | 5 | i18n message module: English/Chinese lookup, language switching, fallback behavior |
+| `test_main.py` | 13 | `parse_classes()` name ID/mixed parsing, edge cases |
+| `test_backend.py` | 41 | Cross-platform backend detection, multi-backend config paths, device fallback logic, backend dependency check |
 
 ### Bug Regression Tests
 
@@ -749,8 +756,8 @@ The project is configured with a GitHub Actions CI/CD pipeline (H-04) that autom
 | Job | Description | Failure Handling |
 |-----|-------------|------------------|
 | `syntax-check` | Runs `py_compile` syntax check on all `.py` files | Blocking (hard requirement) |
-| `unit-tests` | Runs `pytest tests/ -v --cov` and uploads coverage report | Non-blocking (initial phase) |
-| `code-quality` | Runs `pylint` (threshold 6.0) and `mypy` type checking | Non-blocking (initial phase) |
+| `unit-tests` | Runs `pytest tests/ -v --cov`, **cross-platform matrix** (Ubuntu/macOS/Windows) | Blocking (test failures block merge) |
+| `code-quality` | Runs `pylint` (threshold 6.0) and `mypy` type checking | Blocking (quality threshold blocks merge) |
 
 Configuration file: `.github/workflows/ci.yml`
 
@@ -758,25 +765,34 @@ Configuration file: `.github/workflows/ci.yml`
 
 ## Model Distribution
 
-To lower the barrier to first-time use (H-05), the project provides two ways to obtain models:
+To lower the barrier to first-time use (H-05), the project provides multiple ways to obtain models, supporting different inference backends:
 
 ### Option 1: Download a Pre-Exported Model (Recommended)
 
 ```bash
-# Download the default model (yolo26s INT8 OpenVINO)
+# Download the OpenVINO INT8 model (default)
 python download_model.py
+
+# Download a CUDA .pt model
+python download_model.py --backend cuda
 
 # Specify a model
 python download_model.py --model yolo26n
+python download_model.py --model yolo26n --backend cuda
 
 # List available models
 python download_model.py --list
 
 # Overwrite an existing model
 python download_model.py --force
+
+# TensorRT backend (engine must be exported locally)
+python download_model.py --backend tensorrt
 ```
 
-Pre-exported models are hosted on GitHub Release and require no online calibration — they are ready to use immediately after download.
+Pre-exported models are hosted on GitHub Release and require no online calibration — they are ready to use immediately after download. After download, SHA256 checksum verification is performed automatically to ensure file integrity.
+
+> **TensorRT note**: TensorRT engines are tied to GPU architecture and cannot be pre-distributed. Using `--backend tensorrt` displays local export instructions.
 
 ### Option 2: Manual Export (Full Pipeline)
 
@@ -792,11 +808,30 @@ python export_model.py --benchmark
 
 | Model | INT8 Size | Inference Speed | Use Case |
 |-------|-----------|-----------------|----------|
-| yolo26n | ~3 MB | ~170 fps | Speed priority |
+| yolo26n | ~6 MB | ~170 fps | Speed priority |
 | yolo26s | ~10 MB | ~97 fps | **Recommended** |
 | yolo26m | ~26 MB | ~63 fps | Accuracy priority |
 | yolo26l | ~44 MB | ~49 fps | High accuracy |
 | yolo26x | ~69 MB | ~28 fps | Highest accuracy |
+
+---
+
+## Quick Troubleshooting
+
+When encountering issues, troubleshoot in the following order:
+
+| Symptom | First Step | Second Step | Third Step |
+|---------|-----------|-------------|------------|
+| Camera cannot open | Check USB connection and UVC mode | `python main.py --list-cameras` | Close programs occupying the camera |
+| Model file not found | `python download_model.py` | `python export_model.py` | Check the `models/exported/` directory |
+| Intel GPU unavailable | Install Arc driver | `python -c "from openvino import Core; print(Core().available_devices)"` | `python main.py --device intel:cpu` |
+| NVIDIA GPU unavailable | `nvidia-smi` to check driver | `python -c "import torch; print(torch.cuda.is_available())"` | Install CUDA-enabled PyTorch |
+| CUDA PyTorch not installed | `pip install torch --index-url https://download.pytorch.org/whl/cu121` | Or switch: `MODEL.backend = 'openvino'` | `pip install -r requirements-optional.txt` |
+| Slow inference speed | Confirm using INT8 model | Check device (`intel:gpu` / `0`) | `python export_model.py --benchmark` |
+| Stuttering display | Use USB 3.0+ port | Lower resolution to 720P | Replace with a high-quality data cable |
+| TensorRT engine missing | TensorRT engine must be exported locally | `python export_model.py` | Or switch: `MODEL.backend = 'cuda'` |
+
+> For detailed troubleshooting steps, see the [FAQ](#faq) section below.
 
 ---
 

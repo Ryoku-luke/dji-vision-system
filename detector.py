@@ -175,17 +175,22 @@ class OpenVINODetector:
             try:
                 import torch
                 if not torch.cuda.is_available():
-                    logger.error(t("cuda_unavailable", backend=MODEL.backend))
-                    logger.error("请确认:")
-                    logger.error("  1. 已安装 NVIDIA 显卡驱动 (nvidia-smi 可用)")
-                    logger.error("  2. 已安装 CUDA 版 PyTorch (非 CPU 版)")
-                    logger.error("  3. 运行: pip install torch --index-url https://download.pytorch.org/whl/cu121")
-                    logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'openvino'")
+                    # Distinguish: CPU-only PyTorch vs. GPU not detected
+                    # 区分: CPU 版 PyTorch vs. 未检测到 GPU
+                    cuda_version = getattr(torch.version, "cuda", None)
+                    if cuda_version is None:
+                        logger.error(t("cuda_torch_cpu_only"))
+                    else:
+                        logger.error(t("cuda_unavailable", backend=MODEL.backend))
+                    logger.error(t("cuda_check_1"))
+                    logger.error(t("cuda_check_2"))
+                    logger.error(t("cuda_install_cmd"))
+                    logger.error(t("backend_switch_hint"))
                     return False
             except ImportError:
                 logger.error(t("torch_not_installed"))
-                logger.error("  运行: pip install -r requirements-optional.txt")
-                logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'openvino'")
+                logger.error(t("install_optional_deps"))
+                logger.error(t("backend_switch_hint"))
                 return False
 
             if MODEL.backend == "tensorrt":
@@ -193,8 +198,8 @@ class OpenVINODetector:
                     import tensorrt  # noqa: F401
                 except ImportError:
                     logger.error(t("tensorrt_not_installed"))
-                    logger.error("  请安装与 CUDA 版本对应的 TensorRT")
-                    logger.error("  或切换后端: 在 config.py 中设置 MODEL.backend = 'cuda'")
+                    logger.error(t("tensorrt_install_hint"))
+                    logger.error(t("backend_switch_cuda"))
                     return False
 
         if MODEL.backend == "openvino":
@@ -202,7 +207,7 @@ class OpenVINODetector:
                 import openvino  # noqa: F401
             except ImportError:
                 logger.error(t("openvino_not_installed"))
-                logger.error("  运行: pip install openvino")
+                logger.error(t("install_openvino"))
                 return False
 
         return True

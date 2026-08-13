@@ -33,6 +33,7 @@
 - [自动化测试](#自动化测试)
 - [CI/CD 流水线](#cicd-流水线)
 - [模型分发](#模型分发)
+- [快速故障排查](#快速故障排查)
 - [常见问题](#常见问题)
 - [BUG 修复测试报告](#bug-修复测试报告)
 - [技术栈版本](#技术栈版本)
@@ -198,7 +199,9 @@
 
 | 功能 | 说明 | CLI 参数 |
 |------|------|---------|
-| 下载预导出模型 | 从 GitHub Release 下载预导出的 OpenVINO INT8 模型, 无需手动校准 | `--model yolo26s` |
+| 下载预导出模型 | 从 GitHub Release 下载预导出模型, 支持 OpenVINO INT8 和 CUDA .pt | `--model yolo26s --backend openvino` |
+| 多后端下载 | `--backend` 指定后端: openvino (INT8 .zip) / cuda (.pt) / tensorrt (导出指引) | `--backend cuda` |
+| SHA256 校验 | 下载后自动校验文件 SHA256 哈希, 确保完整性 | 自动校验 |
 | 列出可用模型 | 显示 5 个模型的名称、大小、推理速度、适用场景 | `--list` |
 | 覆盖已有模型 | 下载时覆盖已存在的模型文件 | `--force` |
 | 指定版本 | 下载特定 Release 版本的模型 | `--version v1.0.0` |
@@ -515,6 +518,7 @@ python main.py --input video.mp4 --classes person,car --flip --save --log-detect
 | `export_model.py` | `--device` | 导出时使用的设备 (`cpu` 或 `0`) |
 | `export_model.py` | `--benchmark` | 导出后运行基准测试 |
 | `download_model.py` | `--model` | 模型名称 (如 `yolo26s`, `yolo26m`, 默认: yolo26s) |
+| `download_model.py` | `--backend` | 推理后端: `openvino` (默认) / `cuda` / `tensorrt` |
 | `download_model.py` | `--list` | 列出可用模型及其大小和推理速度 |
 | `download_model.py` | `--force` | 覆盖已存在的模型文件 |
 | `download_model.py` | `--version` | 指定 Release 版本号 (默认: v1.0.0) |
@@ -538,13 +542,13 @@ dji-vision-system/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml         # GitHub Actions CI/CD (H-04, 语法检查/测试/代码质量)
-├── tests/                 # 自动化测试 (H-03/H-09, 106 个 pytest 用例)
+├── tests/                 # 自动化测试 (106 个 pytest 用例)
 │   ├── conftest.py        # 测试 fixtures (含 cv2 桩模块)
-│   ├── test_config.py     # 配置模块测试 (16 个)
-│   ├── test_detector.py   # 检测器测试 (19 个, 含 BUG-01 回归)
+│   ├── test_config.py     # 配置模块测试 (20 个)
+│   ├── test_detector.py   # 检测器测试 (17 个, 含 BUG-01 回归)
 │   ├── test_camera_capture.py  # 摄像头测试 (15 个, 含 BUG-08 回归)
-│   ├── test_main.py       # 主程序工具函数测试 (15 个)
-│   └── test_backend.py    # 跨平台后端 & 多后端推理测试 (36 个, H-09)
+│   ├── test_main.py       # 主程序工具函数测试 (13 个)
+│   └── test_backend.py    # 跨平台后端 & 多后端推理测试 (41 个)
 ├── models/                # 模型文件目录 (自动创建, 已 gitignore)
 │   ├── yolo26s.pt         # 原始 PyTorch 模型
 │   └── exported/          # 导出后的模型
@@ -636,15 +640,20 @@ class DisplayConfig:
 | yolo26l | 20.31 ms | ~49 fps | 高精度, 接近极限 |
 | yolo26x | 35.16 ms | ~28 fps | 最高精度, 无法实时 |
 
+> **关于 yolo26 命名**: yolo26n/s/m/l/x 基于 Ultralytics YOLO 系列模型, 权重由 Ultralytics 自动下载 (`YOLO("yolo26s.pt")` 首次运行时从官方仓库获取)。n/s/m/l/x 对应 Nano/Small/Medium/Large/Extra Large 五种规格, 参数量与精度递增、速度递减。
+
 ### 各后端性能对比参考
 
 | 后端 | 精度 | 典型推理速度 | 说明 |
 |------|------|:-----------:|------|
 | OpenVINO (Intel Arc GPU) | INT8 | ~97 fps (yolo26s) | Intel 平台最优, INT8 量化加速 |
 | OpenVINO (Intel CPU) | INT8 | ~15-25 fps | 无 GPU 时的回退方案 |
+| CUDA (NVIDIA RTX 4060) | FP16 | ~120-140 fps | 消费级显卡, FP16 加速, 仅供参考 |
+| CUDA (NVIDIA RTX 3060) | FP16 | ~80-100 fps | 消费级显卡, 仅供参考 |
 | CUDA (NVIDIA GPU) | FP32/FP16 | 因 GPU 型号而异 | 需 CUDA 版 PyTorch, 直接加载 .pt |
+| TensorRT (NVIDIA RTX 4060) | INT8/FP16 | ~150-180 fps | 最快推理, 需导出 TensorRT 引擎, 仅供参考 |
 | TensorRT (NVIDIA GPU) | INT8/FP16 | 最快 (因 GPU 型号而异) | 需导出 TensorRT 引擎, 推理最快 |
-| OpenVINO (macOS) | INT8 | ~10-20 fps (CPU only) | macOS 上 OpenVINO 仅支持 CPU 推理 |
+| OpenVINO (macOS) | INT8 | ~10-20 fps (CPU only) | macOS 上 OpenVINO 仅支持 CPU 推理, 无 GPU 加速, 性能依赖 CPU 核心数 |
 
 ---
 
@@ -705,11 +714,11 @@ python -m pytest tests/test_detector.py -v
 
 | 测试文件 | 用例数 | 覆盖内容 |
 |---------|:------:|---------|
-| `test_config.py` | 16 | CameraConfig 默认值/平台检测、ModelConfig 路径生成/后端切换、DisplayConfig、COCO 80 类 |
-| `test_detector.py` | 19 | Detection 几何属性、DetectionResult FPS 计算/过滤、BUG-01 回归测试 |
+| `test_config.py` | 20 | CameraConfig 默认值/平台检测、ModelConfig 路径生成/后端切换、DisplayConfig、COCO 80 类 |
+| `test_detector.py` | 17 | Detection 几何属性、DetectionResult FPS 计算/过滤、BUG-01 回归测试 |
 | `test_camera_capture.py` | 15 | BUG-08 回归测试 (falsy 判断)、视频文件模式、上下文管理器 |
-| `test_main.py` | 15 | `parse_classes()` 名称/ID/混合解析、边界情况 |
-| `test_backend.py` | 36 | 跨平台后端检测、多后端配置路径、设备回退逻辑 (H-09) |
+| `test_main.py` | 13 | `parse_classes()` 名称/ID/混合解析、边界情况 |
+| `test_backend.py` | 41 | 跨平台后端检测、多后端配置路径、设备回退逻辑、后端依赖检查 |
 
 ### BUG 回归测试
 
@@ -727,8 +736,8 @@ python -m pytest tests/test_detector.py -v
 | 作业 | 说明 | 失败处理 |
 |------|------|---------|
 | `syntax-check` | 对所有 `.py` 文件运行 `py_compile` 语法检查 | 阻塞（硬性要求） |
-| `unit-tests` | 运行 `pytest tests/ -v --cov` 并上传覆盖率报告 | 非阻塞（初始阶段） |
-| `code-quality` | 运行 `pylint`（阈值 6.0）和 `mypy` 类型检查 | 非阻塞（初始阶段） |
+| `unit-tests` | 运行 `pytest tests/ -v --cov`, **跨平台矩阵** (Ubuntu/macOS/Windows) | 阻塞（测试失败阻止合并） |
+| `code-quality` | 运行 `pylint`（阈值 6.0）和 `mypy` 类型检查 | 阻塞（质量不达标阻止合并） |
 
 配置文件: `.github/workflows/ci.yml`
 
@@ -736,25 +745,34 @@ python -m pytest tests/test_detector.py -v
 
 ## 模型分发
 
-为降低首次使用门槛（H-05），项目提供两种获取模型的方式：
+为降低首次使用门槛，项目提供多种获取模型的方式，支持不同推理后端：
 
 ### 方式一：下载预导出模型（推荐）
 
 ```bash
-# 下载默认模型 (yolo26s INT8 OpenVINO)
+# 下载 OpenVINO INT8 模型 (默认)
 python download_model.py
+
+# 下载 CUDA .pt 模型
+python download_model.py --backend cuda
 
 # 指定模型
 python download_model.py --model yolo26n
+python download_model.py --model yolo26n --backend cuda
 
 # 列出可用模型
 python download_model.py --list
 
 # 覆盖已存在的模型
 python download_model.py --force
+
+# TensorRT 后端 (引擎需本地导出)
+python download_model.py --backend tensorrt
 ```
 
-预导出模型托管在 GitHub Release，无需联网校准，下载后即可使用。
+预导出模型托管在 GitHub Release，无需联网校准，下载后即可使用。下载完成后自动进行 SHA256 校验，确保文件完整性。
+
+> **TensorRT 说明**: TensorRT 引擎与 GPU 架构绑定，无法预分发。使用 `--backend tensorrt` 会显示本地导出指引。
 
 ### 方式二：手动导出（完整流程）
 
@@ -770,11 +788,30 @@ python export_model.py --benchmark
 
 | 模型 | INT8 大小 | 推理速度 | 适用场景 |
 |------|----------|---------|---------|
-| yolo26n | ~3 MB | ~170 fps | 速度优先 |
+| yolo26n | ~6 MB | ~170 fps | 速度优先 |
 | yolo26s | ~10 MB | ~97 fps | **推荐** |
 | yolo26m | ~26 MB | ~63 fps | 精度优先 |
 | yolo26l | ~44 MB | ~49 fps | 高精度 |
 | yolo26x | ~69 MB | ~28 fps | 最高精度 |
+
+---
+
+## 快速故障排查
+
+遇到问题时，按以下顺序排查：
+
+| 症状 | 第一步 | 第二步 | 第三步 |
+|------|--------|--------|--------|
+| 摄像头打不开 | 检查 USB 连接与 UVC 模式 | `python main.py --list-cameras` | 关闭占用摄像头的程序 |
+| 模型文件不存在 | `python download_model.py` | `python export_model.py` | 检查 `models/exported/` 目录 |
+| Intel GPU 不可用 | 安装 Arc 驱动 | `python -c "from openvino import Core; print(Core().available_devices)"` | `python main.py --device intel:cpu` |
+| NVIDIA GPU 不可用 | `nvidia-smi` 检查驱动 | `python -c "import torch; print(torch.cuda.is_available())"` | 安装 CUDA 版 PyTorch |
+| CUDA 版 PyTorch 未安装 | `pip install torch --index-url https://download.pytorch.org/whl/cu121` | 或切换: `MODEL.backend = 'openvino'` | `pip install -r requirements-optional.txt` |
+| 推理速度慢 | 确认使用 INT8 模型 | 检查设备 (`intel:gpu` / `0`) | `python export_model.py --benchmark` |
+| 画面卡顿 | 使用 USB 3.0+ 接口 | 降低分辨率到 720P | 更换高质量数据线 |
+| TensorRT 引擎缺失 | TensorRT 引擎需本地导出 | `python export_model.py` | 或切换: `MODEL.backend = 'cuda'` |
+
+> 详细排查步骤见下方 [常见问题](#常见问题) 章节。
 
 ---
 

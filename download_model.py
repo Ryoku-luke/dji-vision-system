@@ -19,6 +19,7 @@ Note / 注意:
 """
 
 import argparse
+import hashlib
 import sys
 import shutil
 import zipfile
@@ -49,7 +50,7 @@ EXPORTED_DIR = PROJECT_ROOT / "models" / "exported"
 AVAILABLE_MODELS = {
     "yolo26n": {
         "description": "Nano 模型 - 速度优先, 精度要求低",
-        "size_mb": 3.2,
+        "size_mb": 6.2,
         "inference_ms": 5.86,
         "fps": "~170",
     },
@@ -79,26 +80,63 @@ AVAILABLE_MODELS = {
     },
 }
 
+# Backend download configuration / 后端下载配置
+# Defines what file to download and where to put it for each backend
+BACKEND_CONFIG = {
+    "openvino": {
+        "asset_suffix": "_int8_openvino_model.zip",
+        "target_suffix": "_int8_openvino_model",
+        "needs_extract": True,
+        "verify_ext": ".xml",
+    },
+    "cuda": {
+        "asset_suffix": ".pt",
+        "target_suffix": ".pt",
+        "needs_extract": False,
+        "verify_ext": ".pt",
+    },
+    # TensorRT engines are GPU-architecture-specific and cannot be distributed
+    # TensorRT 引擎与 GPU 架构绑定, 无法预分发, 需用户本地导出
+    "tensorrt": {
+        "needs_export": True,
+    },
+}
+
 
 class ModelDownloader:
-    """Downloader for pre-exported OpenVINO INT8 models. 预导出模型下载器。"""
+    """Downloader for pre-exported models. 预导出模型下载器。
 
-    def __init__(self, version: str = RELEASE_VERSION):
+    Supports OpenVINO INT8 models (download .zip) and CUDA .pt models (download .pt).
+    TensorRT engines are GPU-architecture-specific and must be exported locally.
+    """
+
+    def __init__(self, version: str = RELEASE_VERSION, backend: str = "openvino"):
         """Init the downloader.
 
         Args:
             version: Release version (e.g. "v1.0.0").
+            backend: Inference backend ("openvino", "cuda", or "tensorrt").
         """
         self.version = version
-        self.exported_dir = EXPORTED_DIR
+        self.backend = backend
+        if backend == "openvino":
+            self.exported_dir = EXPORTED_DIR
+        elif backend == "cuda":
+            self.exported_dir = PROJECT_ROOT / "models"
+        else:
+            self.exported_dir = EXPORTED_DIR
 
     def get_model_dir(self, model_name: str) -> Path:
-        """Return the target model directory path."""
-        return self.exported_dir / f"{model_name}_int8_openvino_model"
+        """Return the target model directory/file path."""
+        cfg = BACKEND_CONFIG.get(self.backend, BACKEND_CONFIG["openvino"])
+        suffix = cfg.get("target_suffix", "_int8_openvino_model")
+        target = self.exported_dir / f"{model_name}{suffix}"
+        return target
 
     def get_download_url(self, model_name: str) -> str:
         """Build the Release asset download URL."""
-        asset_name = f"{model_name}_int8_openvino_model.zip"
+        cfg = BACKEND_CONFIG.get(self.backend, BACKEND_CONFIG["openvino"])
+        asset_name = f"{model_name}{cfg.get('asset_suffix', '_int8_openvino_model.zip')}"
         return DOWNLOAD_URL_TEMPLATE.format(
             owner=GITHUB_OWNER,
             repo=GITHUB_REPO,
@@ -262,12 +300,80 @@ class ModelDownloader:
         return model_dir
 
     def _verify_model(self, model_dir: Path, model_name: str) -> bool:
-        """Verify model file integrity by checking for required .xml and .bin files."""
-        required_files = [f"{model_name}.xml", f"{model_name}.bin"]
-        missing = [f for f in required_files if not (model_dir / f).exists()]
-        if missing:
-            print(f"Error: missing required model files / 错误: 缺少必要的模型文件: {', '.join(missing)}")
+        """Verify model file integrity based on backend type."""
+        cfg = BACKEND_CONFIG.get(self.backend, BACKEND_CONFIG["openvino"])
+        if self.backend == "cuda":
+            # CUDA: verify .pt file exists
+            pt_file = self.exported_dir / f"{model_name}.pt"
+            if not pt_file.exists():
+                print(f"Error: missing model file / 错误: 缺少模型文件: {pt_file.name}")
+                return False
+            return True
+        else:
+            # OpenVINO: verify .xml and .bin
+            required_files = [f"{model_name}.xml", f"{model_name}.bin"]
+            missing = [f for f in required_files if not (model_dir / f).exists()]
+            if missing:
+                print(f"Error: missing required model files / 错误: 缺少必要的模型文件: {', '.join(missing)}")
+                return False
+            return True
+
+    @staticmethod
+    def _compute_sha256(file_path: Path) -> str:
+        """Compute SHA256 hash of a file."""
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def _verify_checksum(self, file_path: Path, model_name: str) -> bool:
+        """Verify file integrity via SHA256 checksum.
+
+        Downloads a checksums.txt file from the Release and verifies the
+        downloaded file against the expected hash. If checksums.txt is not
+        available, a warning is printed and verification is skipped.
+        """
+        checksum_url = DOWNLOAD_URL_TEMPLATE.format(
+            owner=GITHUB_OWNER,
+            repo=GITHUB_REPO,
+            version=self.version,
+            asset="checksums.txt",
+        )
+        try:
+            req = urllib.request.Request(
+                checksum_url,
+                headers={"User-Agent": "dji-vision-system/1.0"},
+            )
+            with urllib.request.urlopen(req) as response:
+                checksums_text = response.read().decode("utf-8")
+        except urllib.error.HTTPError:
+            print(f"  Warning: checksums.txt not found, skipping SHA256 verification")
+            print(f"  警告: 未找到 checksums.txt, 跳过 SHA256 校验")
+            return True
+
+        # Parse checksums file (format: "<hash>  <filename>")
+        expected_hash = None
+        target_name = file_path.name
+        for line in checksums_text.strip().split("\n"):
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[1] == target_name:
+                expected_hash = parts[0]
+                break
+
+        if expected_hash is None:
+            print(f"  Warning: {target_name} not found in checksums.txt, skipping verification")
+            return True
+
+        actual_hash = self._compute_sha256(file_path)
+        if actual_hash != expected_hash:
+            print(f"  Error: SHA256 mismatch!")
+            print(f"    Expected: {expected_hash}")
+            print(f"    Actual:   {actual_hash}")
+            print(f"  The downloaded file may be corrupted, please retry with --force")
             return False
+
+        print(f"  SHA256 verification passed / SHA256 校验通过")
         return True
 
     def download(self, model_name: str, force: bool = False) -> bool:
@@ -286,18 +392,37 @@ class ModelDownloader:
             print(f"Available models / 可用模型: {', '.join(AVAILABLE_MODELS.keys())}")
             return False
 
+        # TensorRT: engines are GPU-specific, cannot be pre-distributed
+        if self.backend == "tensorrt":
+            print("=" * 60)
+            print(f"  TensorRT backend / TensorRT 后端")
+            print("=" * 60)
+            print(f"TensorRT engines are compiled for specific GPU architectures")
+            print(f"and cannot be pre-distributed. Please export locally:")
+            print(f"TensorRT 引擎与 GPU 架构绑定, 无法预分发, 请在本地导出:")
+            print(f"")
+            print(f"  python export_model.py --model {model_name}.pt")
+            print(f"")
+            print(f"Then set backend in config.py:")
+            print(f"在 config.py 中设置后端:")
+            print(f'  MODEL.backend = "tensorrt"')
+            print(f"{'=' * 60}")
+            return True
+
         # Check for an existing model / 检查目标路径是否已存在模型
         if not self._check_existing(model_name, force):
-            # Already present and no --force: treat as success (no re-download needed)
             return True
 
         # Build download URL / 构建下载 URL
         url = self.get_download_url(model_name)
         info = AVAILABLE_MODELS[model_name]
+        cfg = BACKEND_CONFIG.get(self.backend, BACKEND_CONFIG["openvino"])
+        needs_extract = cfg.get("needs_extract", True)
 
         print("=" * 60)
         print(f"  Download pre-exported model / 下载预导出模型: {model_name}")
         print(f"  Version / 版本: {self.version}")
+        print(f"  Backend / 后端: {self.backend}")
         print(f"  Source / 来源: GitHub Release")
         print(f"  Description / 描述: {info['description']}")
         print(f"  Estimated size / 预估大小: {info['size_mb']:.1f} MB")
@@ -305,40 +430,59 @@ class ModelDownloader:
 
         # Prepare download directory / 准备下载目录
         self.exported_dir.mkdir(parents=True, exist_ok=True)
-        temp_zip = self.exported_dir / f"_{model_name}_download_tmp.zip"
+
+        # For zip downloads, use a temp file; for .pt, download directly
+        if needs_extract:
+            temp_file = self.exported_dir / f"_{model_name}_download_tmp.zip"
+        else:
+            temp_file = self.exported_dir / f"{model_name}{cfg.get('target_suffix', '.pt')}"
 
         try:
             # Step 1: download / 第 1 步: 下载
-            print(f"\n[1/3] Downloading model file / 下载模型文件...")
+            print(f"\n[1/4] Downloading model file / 下载模型文件...")
             print(f"  URL: {url}")
-            downloaded_bytes = self._download_file(url, temp_zip)
+            downloaded_bytes = self._download_file(url, temp_file)
             print(f"  Download complete / 下载完成: {self.format_size(downloaded_bytes)}")
 
-            # Step 2: extract / 第 2 步: 解压
-            print(f"\n[2/3] Extracting model file / 解压模型文件...")
-            model_dir = self._extract_model(temp_zip, model_name)
-            print(f"  Extraction complete / 解压完成: {model_dir}")
+            # Step 2: SHA256 verification / 第 2 步: SHA256 校验
+            print(f"\n[2/4] Verifying SHA256 checksum / 校验 SHA256 哈希...")
+            if not self._verify_checksum(temp_file, model_name):
+                if temp_file.exists():
+                    temp_file.unlink()
+                return False
 
-            # List extracted files / 列出解压后的文件
-            for f in sorted(model_dir.iterdir()):
-                if f.is_file():
-                    size = f.stat().st_size
-                    print(f"    - {f.name} ({self.format_size(size)})")
+            # Step 3: extract or move / 第 3 步: 解压或移动
+            if needs_extract:
+                print(f"\n[3/4] Extracting model file / 解压模型文件...")
+                model_dir = self._extract_model(temp_file, model_name)
+                print(f"  Extraction complete / 解压完成: {model_dir}")
 
-            # Step 3: verify / 第 3 步: 验证
-            print(f"\n[3/3] Verifying model files / 验证模型文件...")
-            if not self._verify_model(model_dir, model_name):
+                for f in sorted(model_dir.iterdir()):
+                    if f.is_file():
+                        size = f.stat().st_size
+                        print(f"    - {f.name} ({self.format_size(size)})")
+            else:
+                print(f"\n[3/4] Model file ready / 模型文件就绪: {temp_file}")
+                model_dir = temp_file
+
+            # Step 4: verify model files / 第 4 步: 验证模型文件
+            print(f"\n[4/4] Verifying model files / 验证模型文件...")
+            if not self._verify_model(model_dir if needs_extract else self.exported_dir, model_name):
                 return False
             print(f"  Verification passed: all required files present / 验证通过: 所有必要文件均存在")
 
             # Compute actual size / 计算实际大小
-            total_size = sum(
-                f.stat().st_size for f in model_dir.rglob("*") if f.is_file()
-            )
+            if needs_extract:
+                total_size = sum(
+                    f.stat().st_size for f in model_dir.rglob("*") if f.is_file()
+                )
+            else:
+                total_size = temp_file.stat().st_size
 
             print(f"\nModel download complete! / 模型下载完成!")
             print(f"  Path / 路径: {model_dir}")
             print(f"  Size / 大小: {self.format_size(total_size)}")
+            print(f"  Backend / 后端: {self.backend}")
             print(f"\nYou can now run main.py to start inference / 现在可以运行 main.py 启动推理:")
             print(f"  python main.py")
 
@@ -350,7 +494,8 @@ class ModelDownloader:
             if e.code == 404:
                 print(f"\nModel file not found (HTTP 404). Possible reasons / 模型文件未找到 (HTTP 404)。可能的原因:")
                 print(f"  1. Release {self.version} has not been created yet / Release {self.version} 尚未创建")
-                print(f"  2. The pre-exported model for {model_name} has not been uploaded / {model_name} 的预导出模型尚未上传到 Release")
+                print(f"  2. The pre-exported model for {model_name} ({self.backend}) has not been uploaded")
+                print(f"     / {model_name} ({self.backend}) 的预导出模型尚未上传到 Release")
                 print(f"  3. Misspelled model name / 模型名称拼写错误")
                 print(f"\nPlease check the GitHub Release page / 请检查 GitHub Release 页面:")
                 print(f"  https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases")
@@ -381,9 +526,11 @@ class ModelDownloader:
             return False
 
         finally:
-            # Clean up temp download file / 清理临时下载文件
-            if temp_zip.exists():
-                temp_zip.unlink()
+            # Clean up temp download file (only for zip downloads) / 清理临时下载文件 (仅 zip 模式)
+            if needs_extract:
+                temp_file = self.exported_dir / f"_{model_name}_download_tmp.zip"
+                if temp_file.exists():
+                    temp_file.unlink()
             # Clean up any leftover temp extract dir / 清理可能残留的临时解压目录
             temp_extract = self.exported_dir / f"_{model_name}_extract_tmp"
             if temp_extract.exists():
@@ -410,8 +557,7 @@ class ModelDownloader:
 def list_available_models():
     """List all available pre-exported models and their reference info."""
     print("=" * 75)
-    print("  Available pre-exported OpenVINO INT8 models")
-    print("  可用的预导出 OpenVINO INT8 模型")
+    print("  Available pre-exported models / 可用的预导出模型")
     print("=" * 75)
     print()
     print(f"  {'Model':<12} {'Size':<10} {'Infer(ms)':<12} {'FPS':<10} {'Description'}")
@@ -430,28 +576,40 @@ def list_available_models():
     print()
     print(f"  * Sizes are estimates; actual size depends on the download / 大小为预估值, 实际大小以下载为准")
     print(f"  * Inference speed measured on Intel Core Ultra 7 155H Arc GPU / 推理速度基于 Intel Core Ultra 7 155H Arc GPU 实测")
+    print(f"  * CUDA backend downloads .pt models; OpenVINO downloads INT8 models / CUDA 后端下载 .pt 模型; OpenVINO 下载 INT8 模型")
+    print(f"  * TensorRT engines must be exported locally (GPU-specific) / TensorRT 引擎需本地导出 (与 GPU 绑定)")
     print()
     print(f"Download command / 下载命令:")
-    print(f"  python download_model.py --model <model_name>")
+    print(f"  python download_model.py --model <model_name> --backend <backend>")
     print()
     print(f"Examples / 示例:")
-    print(f"  python download_model.py                    # Download default model (yolo26s) / 下载默认模型 (yolo26s)")
-    print(f"  python download_model.py --model yolo26m    # Download yolo26m / 下载 yolo26m")
-    print(f"  python download_model.py --list             # List available models / 列出可用模型")
+    print(f"  python download_model.py                                # OpenVINO yolo26s (default)")
+    print(f"  python download_model.py --model yolo26m                # OpenVINO yolo26m")
+    print(f"  python download_model.py --backend cuda                 # CUDA .pt model (yolo26s)")
+    print(f"  python download_model.py --model yolo26n --backend cuda # CUDA yolo26n .pt")
+    print(f"  python download_model.py --backend tensorrt             # TensorRT export guidance")
+    print(f"  python download_model.py --list                         # List available models")
 
 
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Pre-exported model downloader - fetch OpenVINO INT8 models from GitHub Release / "
-                    "预导出模型下载工具 - 从 GitHub Release 下载 OpenVINO INT8 模型",
+        description="Pre-exported model downloader / 预导出模型下载工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples / 示例:
-  python download_model.py                    # Download default model (yolo26s) / 下载默认模型 (yolo26s)
-  python download_model.py --model yolo26m    # Download a specific model / 下载指定模型
-  python download_model.py --list             # List available models and sizes / 列出可用模型及其大小
-  python download_model.py --force            # Overwrite an existing model / 覆盖已存在的模型
+  python download_model.py                                # Download OpenVINO yolo26s (default)
+  python download_model.py --model yolo26m                # Download a specific OpenVINO model
+  python download_model.py --backend cuda                 # Download CUDA .pt model (yolo26s)
+  python download_model.py --backend cuda --model yolo26n # Download CUDA yolo26n .pt
+  python download_model.py --backend tensorrt             # Show TensorRT export guidance
+  python download_model.py --list                         # List available models and sizes
+  python download_model.py --force                        # Overwrite an existing model
+
+Backends / 后端:
+  openvino  Download INT8 OpenVINO model (.zip) - default
+  cuda      Download PyTorch .pt model
+  tensorrt  Show local export guidance (engines are GPU-specific)
 
 Alternative / 替代方案:
   If the download fails (e.g. the Release does not exist yet), export the model manually:
@@ -465,6 +623,13 @@ Alternative / 替代方案:
         default="yolo26s",
         choices=list(AVAILABLE_MODELS.keys()),
         help="Model name (default: yolo26s) / 模型名称 (默认: yolo26s)",
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="openvino",
+        choices=list(BACKEND_CONFIG.keys()),
+        help="Inference backend: openvino (default), cuda, tensorrt / 推理后端",
     )
     parser.add_argument(
         "--list",
@@ -491,7 +656,7 @@ Alternative / 替代方案:
         return
 
     # Download the model / 下载模型
-    downloader = ModelDownloader(version=args.version)
+    downloader = ModelDownloader(version=args.version, backend=args.backend)
     success = downloader.download(args.model, force=args.force)
     sys.exit(0 if success else 1)
 
