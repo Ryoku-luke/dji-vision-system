@@ -88,8 +88,8 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
         print(f"\n[2/3] Exporting OpenVINO FP32 / 导出 OpenVINO FP32")
 
     # Run export / 执行导出
-    exported_path = yolo.export(**export_kwargs)
-    exported_path = Path(exported_path)
+    export_result = yolo.export(**export_kwargs)
+    exported_path = Path(export_result)
     print(f"      Export done / 导出完成: {exported_path}")
 
     # Move to target directory / 重命名到目标目录
