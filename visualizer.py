@@ -3,6 +3,7 @@
 import time
 import logging
 from collections import deque
+from typing import Any
 
 import cv2
 import numpy as np
@@ -32,8 +33,8 @@ class FPSCounter:
 
     def __init__(self, window_size: int = 30):
         self.window_size = window_size
-        self.frame_times = deque(maxlen=window_size)
-        self._last_time = None
+        self.frame_times: deque[float] = deque(maxlen=window_size)
+        self._last_time: float | None = None
 
     def update(self) -> float:
         # Record a frame timestamp, return current average FPS / 记录一帧时间戳, 返回平均 FPS
@@ -65,7 +66,7 @@ class Visualizer:
         self,
         frame: np.ndarray,
         result: DetectionResult,
-        extra_info: dict = None,
+        extra_info: dict | None = None,
         mirror: bool = False,
     ) -> np.ndarray:
         """Draw detection results on the frame / 在帧上绘制检测结果."""
@@ -112,7 +113,7 @@ class Visualizer:
 
         if label:
             # Label background size / 标签背景尺寸
-            (tw, th), baseline = cv2.getTextSize(
+            (tw, th), _ = cv2.getTextSize(
                 label, cv2.FONT_HERSHEY_SIMPLEX, DISPLAY.font_scale, 1
             )
 
@@ -210,19 +211,19 @@ class Visualizer:
 class VideoWriter:
     """Video output writer / 视频输出写入器."""
 
-    def __init__(self, output_path, fps: int = 30, resolution: tuple = None):
+    def __init__(self, output_path, fps: int = 30, resolution: tuple | None = None):
         self.output_path = str(output_path)
         self.fps = fps
         self.resolution = resolution
-        self.writer = None
+        self.writer: Any = None
 
-    def open(self, resolution: tuple = None):
+    def open(self, resolution: tuple | None = None):
         """Open the video writer / 打开视频写入器."""
         res = resolution or self.resolution
         if res is None:
             raise ValueError("请指定视频分辨率")
 
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         self.writer = cv2.VideoWriter(
             self.output_path, fourcc, self.fps, res
         )

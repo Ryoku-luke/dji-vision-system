@@ -11,6 +11,7 @@ import time
 import logging
 import argparse
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -42,15 +43,15 @@ class VisionSystem:
 
     def __init__(
         self,
-        device: str = None,
-        confidence: float = None,
-        iou_threshold: float = None,
-        classes: list[int] = None,
+        device: str | None = None,
+        confidence: float | None = None,
+        iou_threshold: float | None = None,
+        classes: list[int] | None = None,
         show_display: bool = True,
         save_output: bool = False,
         mirror: bool = False,
         log_detections: bool = False,
-        input_source: str = None,
+        input_source: str | None = None,
     ):
         self.device = device
         self.confidence = confidence
@@ -62,16 +63,16 @@ class VisionSystem:
         self.log_detections = log_detections
         self.input_source = input_source
 
-        self.camera = None
-        self.detector = None
+        self.camera: CameraCapture | None = None
+        self.detector: OpenVINODetector | None = None
         self.visualizer = Visualizer()
-        self.video_writer = None
-        self._detection_logger = None
+        self.video_writer: VideoWriter | None = None
+        self._detection_logger: DetectionLogger | None = None
 
         self._running = False
         self._frame_count = 0
-        self._start_time = None
-        self._cached_sysinfo = None
+        self._start_time: float | None = None
+        self._cached_sysinfo: dict | None = None
 
     def initialize(self) -> bool:
         """Initialize all components / 初始化所有组件."""
@@ -244,6 +245,7 @@ class VisionSystem:
             self._cached_sysinfo = {"CPU": f"{cpu:.0f}%", "MEM": f"{mem:.0f}%"}
             return self._cached_sysinfo
         except Exception:
+            self._cached_sysinfo = {}
             return {}
 
     def _save_screenshot(self, frame: np.ndarray):
@@ -295,8 +297,8 @@ class DetectionLogger:
 
     def __init__(self, log_path: Path):
         self.log_path = Path(log_path)
-        self._file = None
-        self._writer = None
+        self._file: Any = None
+        self._writer: Any = None
 
     def open(self) -> bool:
         """Open log file and write CSV header / 打开日志文件, 写入 CSV 表头."""
@@ -337,7 +339,7 @@ class DetectionLogger:
             logger.info(t("log_closed"))
 
 
-def parse_classes(class_str: str) -> list[int]:
+def parse_classes(class_str: str) -> list[int] | None:
     """Parse class filter argument / 解析类别过滤参数 (e.g. "person,car,0")."""
     if not class_str:
         return None

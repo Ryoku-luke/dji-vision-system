@@ -24,7 +24,7 @@ from config import MODEL
 logger = logging.getLogger(__name__)
 
 
-def export_model(model_name: str = None, export_device: str = "cpu"):
+def export_model(model_name: str | None = None, export_device: str = "cpu"):
     """Export a YOLO model to OpenVINO format. 导出 YOLO 模型为 OpenVINO 格式。
 
     Args:
@@ -114,7 +114,7 @@ def export_model(model_name: str = None, export_device: str = "cpu"):
     return target
 
 
-def benchmark_model(model_path: Path = None):
+def benchmark_model(model_path: Path | None = None):
     """Benchmark the exported model. 对导出的模型进行基准测试。
 
     Args:

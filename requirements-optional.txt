@@ -19,6 +19,3 @@ tensorrt>=8.6.0
 # 代码质量检查 (CI/CD 使用)
 pylint>=3.0.0
 mypy>=1.8.0
-
-# 测试覆盖率
-pytest-cov>=4.1.0

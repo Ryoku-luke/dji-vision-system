@@ -1,0 +1,9 @@
+[TYPECHECK]
+# cv2 (OpenCV) is a C extension; pylint cannot introspect its members
+# cv2 是 C 扩展, pylint 无法内省其成员
+ignored-modules = cv2
+
+[FORMAT]
+# messages.py contains long bilingual string literals that cannot be wrapped
+# messages.py 包含无法换行的双语字符串字面量
+max-line-length = 200

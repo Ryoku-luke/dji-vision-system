@@ -7,6 +7,7 @@ import time
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -75,11 +76,11 @@ class OpenVINODetector:
 
     def __init__(
         self,
-        model_path: Path = None,
-        device: str = None,
-        conf_threshold: float = None,
-        iou_threshold: float = None,
-        classes: list[int] = None,
+        model_path: Path | None = None,
+        device: str | None = None,
+        conf_threshold: float | None = None,
+        iou_threshold: float | None = None,
+        classes: list[int] | None = None,
     ):
         self.model_path = model_path if model_path is not None else MODEL.exported_path
         self.device = device if device is not None else MODEL.inference_device
@@ -89,9 +90,9 @@ class OpenVINODetector:
         # None = 检测所有类别, list = 仅检测指定类别
         self.classes = classes
 
-        self.model = None
+        self.model: Any = None
         self._is_loaded = False
-        self._predict_kwargs = None  # Cached kwargs for predict()
+        self._predict_kwargs: dict[str, Any] = {}  # Cached kwargs for predict()
 
     def load(self) -> bool:
         """Load the model and verify the inference device."""
@@ -271,7 +272,7 @@ class OpenVINODetector:
 
     def _parse_results(self, result, frame_shape: tuple[int, int]) -> list[Detection]:
         """Parse Ultralytics results into a list of Detection objects."""
-        detections = []
+        detections: list[Detection] = []
 
         if result.boxes is None:
             return detections

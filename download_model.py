@@ -26,6 +26,7 @@ import zipfile
 import urllib.request
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 
 # GitHub repo info / GitHub 仓库信息
@@ -82,7 +83,7 @@ AVAILABLE_MODELS = {
 
 # Backend download configuration / 后端下载配置
 # Defines what file to download and where to put it for each backend
-BACKEND_CONFIG = {
+BACKEND_CONFIG: dict[str, dict[str, Any]] = {
     "openvino": {
         "asset_suffix": "_int8_openvino_model.zip",
         "target_suffix": "_int8_openvino_model",

@@ -7,6 +7,8 @@ Captures frames from DJI Osmo Action cameras (UVC webcam mode) via OpenCV.
 
 import time
 import logging
+from typing import Any
+
 import cv2
 import numpy as np
 
@@ -21,11 +23,11 @@ class CameraCapture:
 
     def __init__(
         self,
-        device_index: int = None,
-        width: int = None,
-        height: int = None,
-        fps: int = None,
-        source: str = None,
+        device_index: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        fps: int | None = None,
+        source: str | None = None,
     ):
         """Initialize the capture device."""
         self.source = source
@@ -42,7 +44,7 @@ class CameraCapture:
             self.height = height if height is not None else CAMERA.height
             self.fps = fps if fps is not None else CAMERA.fps
 
-        self.cap = None
+        self.cap: Any = None
         self._is_running = False
         self._read_failed = False  # Throttle consecutive read-failure warnings
 
@@ -104,6 +106,7 @@ class CameraCapture:
         """Open a video file."""
         from pathlib import Path
 
+        assert self.source is not None  # _is_file guarantees source is set
         file_path = Path(self.source)
         if not file_path.exists():
             logger.error(t("video_not_found", path=self.source))
