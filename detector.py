@@ -270,7 +270,7 @@ class OpenVINODetector:
             for r, f in zip(results, frames)
         ]
 
-    def _parse_results(self, result, frame_shape: tuple[int, int]) -> list[Detection]:
+    def _parse_results(self, result: Any, frame_shape: tuple[int, int]) -> list[Detection]:
         """Parse Ultralytics results into a list of Detection objects."""
         detections: list[Detection] = []
 

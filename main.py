@@ -20,7 +20,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 
 import config
-from config import CAMERA, MODEL, DISPLAY, CLASSES
+from config import MODEL, DISPLAY, CLASSES
 from camera_capture import CameraCapture
 from detector import OpenVINODetector, DetectionResult
 from visualizer import Visualizer, VideoWriter
@@ -73,9 +73,22 @@ class VisionSystem:
         self._frame_count = 0
         self._start_time: float | None = None
         self._cached_sysinfo: dict | None = None
+        self._psutil_available = False
+
+    def _init_psutil(self):
+        """Pre-warm psutil so cpu_percent returns meaningful values on first call."""
+        try:
+            import psutil
+            psutil.cpu_percent(interval=None)
+            self._psutil_available = True
+        except Exception:
+            self._psutil_available = False
 
     def initialize(self) -> bool:
         """Initialize all components / 初始化所有组件."""
+        # Pre-warm psutil so first-frame CPU reading is meaningful
+        self._init_psutil()
+
         logger.info("=" * 60)
         logger.info(f"  {t('system_title')}")
         backend_display = _BACKEND_NAMES.get(MODEL.backend, MODEL.backend.upper())
@@ -234,6 +247,8 @@ class VisionSystem:
 
     def _get_system_info(self) -> dict:
         """Get system resource usage (throttled to every 30 frames)."""
+        if not self._psutil_available:
+            return {}
         # Throttle psutil calls to avoid per-frame overhead
         # 限制 psutil 调用频率, 避免逐帧开销
         if self._frame_count % 30 != 0 and self._cached_sysinfo is not None:
@@ -304,8 +319,8 @@ class DetectionLogger:
         """Open log file and write CSV header / 打开日志文件, 写入 CSV 表头."""
         try:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            import csv
-            self._file = open(self.log_path, "w", newline="", encoding="utf-8")
+            import csv  # pylint: disable=import-outside-toplevel
+            self._file = open(self.log_path, "w", newline="", encoding="utf-8")  # pylint: disable=consider-using-with
             self._writer = csv.writer(self._file)
             self._writer.writerow([
                 "timestamp", "frame", "class_id", "class_name",
@@ -366,6 +381,7 @@ def parse_classes(class_str: str) -> list[int] | None:
 
 
 def main():
+    """CLI entry point: parse args and start the vision system / CLI 入口: 解析参数并启动视觉识别系统."""
     parser = argparse.ArgumentParser(
         description="DJI Action Camera Vision System / DJI 运动相机视觉识别系统",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -413,8 +429,8 @@ Examples / 示例:
 
     # List cameras / 列出摄像头
     if args.list_cameras:
-        cam = CameraCapture()
-        cam.list_devices()
+        with CameraCapture() as cam:
+            cam.list_devices()
         return
 
     # Check model exists / 检查模型是否存在

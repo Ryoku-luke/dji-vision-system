@@ -25,6 +25,7 @@ COLOR_PALETTE = [
 
 
 def get_color(class_id: int) -> tuple[int, int, int]:
+    """Return a fixed BGR color for a class ID / 为类别 ID 返回固定 BGR 颜色."""
     return COLOR_PALETTE[class_id % len(COLOR_PALETTE)]
 
 
@@ -37,7 +38,7 @@ class FPSCounter:
         self._last_time: float | None = None
 
     def update(self) -> float:
-        # Record a frame timestamp, return current average FPS / 记录一帧时间戳, 返回平均 FPS
+        """Record a frame timestamp, return current average FPS / 记录时间戳, 返回平均 FPS."""
         now = time.perf_counter()
         if self._last_time is not None:
             self.frame_times.append(now - self._last_time)
@@ -52,6 +53,7 @@ class FPSCounter:
         return 1.0 / avg_interval
 
     def reset(self):
+        """Clear the frame time history / 清空帧时间历史记录."""
         self.frame_times.clear()
         self._last_time = None
 
@@ -146,7 +148,7 @@ class Visualizer:
         num_objects: int,
         inference_ms: float,
         extra_info: dict,
-    ):
+    ):  # pylint: disable=too-many-locals
         """Draw the top-left info panel / 绘制左上角信息面板."""
         lines = []
 
@@ -205,6 +207,7 @@ class Visualizer:
             )
 
     def reset_fps(self):
+        """Reset the FPS counter / 重置 FPS 计数器."""
         self.fps_counter.reset()
 
 
@@ -221,7 +224,7 @@ class VideoWriter:
         """Open the video writer / 打开视频写入器."""
         res = resolution or self.resolution
         if res is None:
-            raise ValueError("请指定视频分辨率")
+            raise ValueError("Resolution required / 请指定视频分辨率")
 
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         self.writer = cv2.VideoWriter(

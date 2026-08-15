@@ -172,11 +172,15 @@ class CameraCapture:
         available = []
         for i in range(5):  # Check up to 5 devices
             cap = cv2.VideoCapture(i, CAMERA.api_preference)
-            if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    available.append(i)
-            cap.release()
+            try:
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    if ret:
+                        available.append(i)
+            except Exception:
+                pass  # Skip devices that throw on read
+            finally:
+                cap.release()
         logger.info(t("camera_devices", devices=available))
         return available
 

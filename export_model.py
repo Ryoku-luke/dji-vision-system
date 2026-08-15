@@ -143,8 +143,12 @@ def benchmark_model(model_path: Path | None = None):
     # Handle both cases for version compatibility.
     # 某些 ultralytics 版本返回 float (mAP) 而非 dict，需兼容处理。
     if isinstance(results, dict):
-        inference_time = results.get('speed/inference') or results.get('inference_time')
-        map_val = results.get('metrics/mAP50-95(B)') or results.get('mAP50-95(B)')
+        inference_time = results.get('speed/inference')
+        if inference_time is None:
+            inference_time = results.get('inference_time')
+        map_val = results.get('metrics/mAP50-95(B)')
+        if map_val is None:
+            map_val = results.get('mAP50-95(B)')
     else:
         # Some ultralytics versions return a float directly / 某些版本直接返回 float
         inference_time = None
