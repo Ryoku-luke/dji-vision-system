@@ -902,7 +902,7 @@ python export_model.py
 |:----:|:--------:|------|---------|---------|:----:|
 | BUG-01 | **严重** | `detector.py` | `conf_threshold` / `iou_threshold` / `device` 使用 `or` 判断，传入 `0.0` 时被替换为默认值 | 改用 `is not None` 判断 | PASS |
 | BUG-02 | **严重** | `main.py` | VideoWriter 使用请求分辨率而非摄像头实际分辨率 | 从 `cap.get()` 读取实际分辨率 | PASS |
-| BUG-03 | **中等** | `export_model.py` | 模型下载路径相对于 CWD，从其他目录运行时找不到文件 | 添加下载失败警告和日志 | PASS |
+| BUG-03 | **中等** | `export_model.py` | 模型下载路径相对于 CWD，从其他目录运行时找不到文件 | 临时切换 CWD 到 models_dir，确保权重落在目标目录 | PASS |
 | BUG-04 | **中等** | `main.py` | FP16 精度模式显示为 "FP32" | 修复三元表达式，增加 FP16 分支 | PASS |
 | BUG-05 | **中等** | `export_model.py` | benchmark 结果键名 `inference_time` 与实际返回的 `speed/inference` 不匹配 | 兼容多种键名 | PASS |
 | BUG-06 | **轻微** | `config.py` / `detector.py` / `visualizer.py` | 未使用的导入：`field`、`cv2`、`CLASSES` | 移除无用导入 | PASS |
@@ -973,18 +973,36 @@ python export_model.py
 | 用例 | 执行目录 | 修复前行为 | 修复后行为 | 结果 |
 |------|---------|-----------|-----------|:----:|
 | TC-03a | 项目根目录 | 正常 (CWD = 脚本目录) | 正常 | PASS |
-| TC-03b | `/home/user` | 文件丢失, 无提示 | 输出警告日志 | PASS |
+| TC-03b | `/home/user` | 文件丢失, 仅警告 | 权重落在 models_dir，无丢失 | PASS |
+| TC-03c | 任意目录 | — | 下载后 CWD 恢复，异常时也恢复 | PASS |
+| TC-03d | 任意目录 | — | 兜底: settings_dir 也能找到 | PASS |
+| TC-03e | 任意目录 | — | 都找不到时抛 FileNotFoundError | PASS |
 
 **代码变更** (`export_model.py`):
 
+抽取 `_download_yolo_weights(name, target_dir)` 辅助函数，从根本上修复：
+
 ```diff
-  downloaded = Path(name)
-  if downloaded.exists():
-      shutil.move(str(downloaded), str(model_path))
-+ else:
-+     # 某些版本可能下载到 ~/.config/ultralytics 或其他位置
-+     logger.warning(f"未在当前目录找到下载的模型文件 {name}, 请检查模型路径")
+- yolo = YOLO(name)
+- downloaded = Path(name)
+- if downloaded.exists():
+-     shutil.move(str(downloaded), str(model_path))
+- else:
+-     logger.warning(f"未在当前目录找到下载的模型文件 {name}, 请检查模型路径")
++ def _download_yolo_weights(name, target_dir):
++     orig_cwd = os.getcwd()
++     try:
++         os.chdir(target_dir)
++         yolo = YOLO(name)  # 权重落在 target_dir / name
++     finally:
++         os.chdir(orig_cwd)
++     if not (target_dir / name).exists():
++         # 兜底: 某些版本下载到 ultralytics settings_dir
++         ...
++     return yolo, target_dir / name
 ```
+
+回归测试: [tests/test_export_model.py](tests/test_export_model.py) 共 6 个用例，覆盖正常路径、CWD 恢复、异常恢复、settings_dir 兜底、找不到时抛错、export_model() 集成衔接。
 
 ### BUG-04：FP16 精度显示错误 [中等]
 
@@ -1234,7 +1252,7 @@ python export_model.py
 |--------|:--------:|------|
 | BUG-01 (falsy 判断) | **高** | 影响检测精度控制，用户无法设置零阈值，可能导致误检或漏检 |
 | BUG-02 (分辨率不匹配) | **高** | 影响视频录制功能，可能导致输出文件损坏或画面变形 |
-| BUG-03 (下载路径) | **中** | 影响非项目根目录执行时的模型部署，已添加警告提示 |
+| BUG-03 (下载路径) | **中** | 影响非项目根目录执行时的模型部署；已根本修复，权重始终落在 models_dir |
 | BUG-04 (精度显示) | **中** | 仅影响日志输出，不影响实际推理精度 |
 | BUG-05 (benchmark 键名) | **中** | 影响性能基准测试输出，不影响推理功能 |
 | BUG-06 (未使用导入) | **低** | 无功能影响，仅代码整洁度问题 |

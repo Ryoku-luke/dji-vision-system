@@ -922,7 +922,7 @@ Four rounds of code review identified **17 bugs in total** (3 severe / 6 medium 
 |:--:|:--------:|------|---------------------|------------|:------:|
 | BUG-01 | **Severe** | `detector.py` | `conf_threshold` / `iou_threshold` / `device` used `or` checks, causing `0.0` to be replaced with defaults | Changed to `is not None` checks | PASS |
 | BUG-02 | **Severe** | `main.py` | VideoWriter used requested resolution instead of camera's actual resolution | Read actual resolution from `cap.get()` | PASS |
-| BUG-03 | **Medium** | `export_model.py` | Model download path was relative to CWD; file not found when run from another directory | Added download failure warning and logging | PASS |
+| BUG-03 | **Medium** | `export_model.py` | Model download path was relative to CWD; file not found when run from another directory | Temporarily switch CWD to models_dir so weights land in target dir | PASS |
 | BUG-04 | **Medium** | `main.py` | FP16 precision mode displayed as "FP32" | Fixed ternary expression, added FP16 branch | PASS |
 | BUG-05 | **Medium** | `export_model.py` | Benchmark result key `inference_time` did not match the actual returned `speed/inference` | Made compatible with multiple key names | PASS |
 | BUG-06 | **Minor** | `config.py` / `detector.py` / `visualizer.py` | Unused imports: `field`, `cv2`, `CLASSES` | Removed unused imports | PASS |
@@ -996,18 +996,36 @@ Four rounds of code review identified **17 bugs in total** (3 severe / 6 medium 
 | Case | Execution Directory | Before Fix | After Fix | Result |
 |------|---------------------|------------|-----------|:------:|
 | TC-03a | Project root | Normal (CWD = script dir) | Normal | PASS |
-| TC-03b | `/home/user` | File lost, no prompt | Warning log output | PASS |
+| TC-03b | `/home/user` | File lost, warning only | Weights land in models_dir, no loss | PASS |
+| TC-03c | Any directory | — | CWD restored after download, even on exception | PASS |
+| TC-03d | Any directory | — | Fallback: weights in settings_dir also found | PASS |
+| TC-03e | Any directory | — | Raises FileNotFoundError when nowhere to be found | PASS |
 
 **Code Changes** (`export_model.py`):
 
+Extracted `_download_yolo_weights(name, target_dir)` helper for a fundamental fix:
+
 ```diff
-  downloaded = Path(name)
-  if downloaded.exists():
-      shutil.move(str(downloaded), str(model_path))
-+ else:
-+     # Some versions may download to ~/.config/ultralytics or other locations
-+     logger.warning(f"Downloaded model file {name} not found in current directory, please check the model path")
+- yolo = YOLO(name)
+- downloaded = Path(name)
+- if downloaded.exists():
+-     shutil.move(str(downloaded), str(model_path))
+- else:
+-     logger.warning(f"Downloaded model file {name} not found in current directory, please check the model path")
++ def _download_yolo_weights(name, target_dir):
++     orig_cwd = os.getcwd()
++     try:
++         os.chdir(target_dir)
++         yolo = YOLO(name)  # weights land in target_dir / name
++     finally:
++         os.chdir(orig_cwd)
++     if not (target_dir / name).exists():
++         # Fallback: some versions download to ultralytics settings_dir
++         ...
++     return yolo, target_dir / name
 ```
+
+Regression tests: [tests/test_export_model.py](tests/test_export_model.py) — 6 cases covering the normal path, CWD restoration, exception-safe restoration, settings_dir fallback, not-found error, and export_model() integration.
 
 ### BUG-04: FP16 precision display error [Medium]
 
@@ -1333,7 +1351,7 @@ All 6 files passed syntax checks with exit code 0, with no compilation errors or
 |-----------|:----------:|-------------|
 | BUG-01 (falsy check) | **High** | Affects detection accuracy control; users cannot set a zero threshold, which may cause false positives or missed detections |
 | BUG-02 (resolution mismatch) | **High** | Affects video recording; may cause corrupted output files or distorted frames |
-| BUG-03 (download path) | **Medium** | Affects model deployment when running from outside the project root; warning prompt added |
+| BUG-03 (download path) | **Medium** | Affects model deployment when running from outside the project root; fundamentally fixed, weights always land in models_dir |
 | BUG-04 (precision display) | **Medium** | Only affects log output, not actual inference precision |
 | BUG-05 (benchmark key) | **Medium** | Affects performance benchmark output, not inference functionality |
 | BUG-06 (unused imports) | **Low** | No functional impact, only a code cleanliness issue |

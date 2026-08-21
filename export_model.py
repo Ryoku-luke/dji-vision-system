@@ -11,6 +11,7 @@ Usage / 用法:
 """
 
 import argparse
+import os
 import sys
 import shutil
 import logging
@@ -24,6 +25,55 @@ from config import MODEL
 logger = logging.getLogger(__name__)
 
 
+def _download_yolo_weights(name: str, target_dir: Path) -> "tuple":
+    """Download YOLO weights into target_dir, robust to the caller's CWD.
+    下载 YOLO 权重到 target_dir，对调用方的工作目录鲁棒。
+
+    Ultralytics 的 ``YOLO(name)`` 会把权重下载到当前工作目录 (CWD)。若调用方
+    从项目根目录之外运行 (如 ``cd /tmp && python /path/to/export_model.py``)，
+    下载的文件不会落在脚本目录，后续 ``Path(name).exists()`` 查找失败，模型
+    无法归位到 ``models/``。本函数临时切换 CWD 到 ``target_dir``，确保权重
+    落在 ``target_dir / name``，从根本上修复 BUG-03。
+
+    Args:
+        name: Model filename, e.g. "yolo26s.pt".
+        target_dir: Directory to download the weights into.
+
+    Returns:
+        Tuple ``(yolo, model_path)`` where ``yolo`` is the loaded YOLO model
+        and ``model_path`` is the absolute path to the downloaded weights.
+
+    Raises:
+        FileNotFoundError: If the weights cannot be located after download.
+    """
+    from ultralytics import YOLO
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    model_path = target_dir / name
+
+    # 临时切换 CWD 到 target_dir，使 YOLO(name) 下载的权重落在该目录。
+    orig_cwd = os.getcwd()
+    try:
+        os.chdir(target_dir)
+        yolo = YOLO(name)
+    finally:
+        os.chdir(orig_cwd)
+
+    if not model_path.exists():
+        # 极端兜底: 某些 Ultralytics 版本可能下载到 settings_dir 而非 CWD。
+        from ultralytics.utils import SETTINGS
+        alt_path = Path(SETTINGS.get("weights_dir", "")) / name
+        if alt_path.exists():
+            shutil.move(str(alt_path), str(model_path))
+        else:
+            raise FileNotFoundError(
+                f"YOLO weights '{name}' downloaded but not found at "
+                f"{model_path} or {alt_path}. "
+                f"/ YOLO 权重 '{name}' 下载成功但未在预期位置找到文件"
+            )
+    return yolo, model_path
+
+
 def export_model(model_name: str | None = None, export_device: str = "cpu"):
     """Export a YOLO model to OpenVINO format. 导出 YOLO 模型为 OpenVINO 格式。
 
@@ -31,8 +81,6 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
         model_name: Model filename (e.g. "yolo26s.pt"); uses config default if None.
         export_device: Device for export ("cpu" or "0" for GPU).
     """
-    from ultralytics import YOLO
-
     # Determine model name / 确定模型名称
     name = model_name or MODEL.model_name
     model_path = MODEL.models_dir / name
@@ -46,22 +94,11 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
     # Check if model file exists; download if missing / 检查模型文件是否存在，不存在则自动下载
     if not model_path.exists():
         print(f"\n[1/3] Downloading model / 下载模型: {name}")
-        MODEL.models_dir.mkdir(parents=True, exist_ok=True)
-        # YOLO constructor auto-downloads to the current working directory
-        yolo = YOLO(name)
-        # Move to models dir (download path is relative to CWD)
-        downloaded = Path(name)
-        if downloaded.exists():
-            shutil.move(str(downloaded), str(model_path))
-        else:
-            # Some versions download to ~/.config/ultralytics or elsewhere
-            logger.warning(
-                f"Downloaded model not found in CWD: {name}; please check the model path. "
-                f"/ 未在当前目录找到下载的模型文件 {name}, 请检查模型路径"
-            )
+        yolo, model_path = _download_yolo_weights(name, MODEL.models_dir)
         print(f"      Model saved to / 模型已保存到: {model_path}")
     else:
         print(f"\n[1/3] Model already exists / 模型已存在: {model_path}")
+        from ultralytics import YOLO
         yolo = YOLO(str(model_path))
 
     # Build export kwargs / 构建导出参数
