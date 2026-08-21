@@ -24,6 +24,10 @@ output/
 *.jpg
 *.png
 
+# 缓存
+.mypy_cache/
+.pytest_cache/
+
 # IDE
 .vscode/
 .idea/
