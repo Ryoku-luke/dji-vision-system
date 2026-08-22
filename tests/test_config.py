@@ -11,6 +11,7 @@ from config import (
     DisplayConfig,
     COCO_CLASSES,
     _detect_api_backend,
+    PROJECT_ROOT,
 )
 
 
@@ -71,8 +72,8 @@ class TestModelConfig:
         assert m.inference_device == "intel:gpu"
         assert m.conf_threshold == 0.5
         assert m.iou_threshold == 0.5
-        assert m.models_dir == Path("models")
-        assert m.exported_dir == Path("models/exported")
+        assert m.models_dir == PROJECT_ROOT / "models"
+        assert m.exported_dir == PROJECT_ROOT / "models" / "exported"
 
     @pytest.mark.parametrize(
         "int8, half, precision",
@@ -85,7 +86,7 @@ class TestModelConfig:
     def test_exported_path_by_precision(self, int8, half, precision):
         """Test exported_path by precision (int8/fp16/fp32) / 测试按精度生成路径"""
         m = ModelConfig(backend="openvino", int8=int8, half=half)
-        expected = Path("models/exported") / f"yolo26s_{precision}_openvino_model"
+        expected = PROJECT_ROOT / "models" / "exported" / f"yolo26s_{precision}_openvino_model"
         assert m.exported_path == expected
 
     @pytest.mark.parametrize(
@@ -98,7 +99,7 @@ class TestModelConfig:
     def test_exported_path_by_backend(self, backend, suffix):
         """Test exported_path by backend (openvino/tensorrt) / 测试按后端生成路径"""
         m = ModelConfig(backend=backend, int8=True, half=False)
-        assert m.exported_path == Path("models/exported") / suffix
+        assert m.exported_path == PROJECT_ROOT / "models" / "exported" / suffix
 
     def test_exported_path_cuda_returns_model_path(self):
         """CUDA needs no export; exported_path returns the raw PyTorch model path."""
@@ -114,7 +115,7 @@ class TestModelConfig:
     def test_model_path(self):
         """Test model_path: models_dir / model_name"""
         m = ModelConfig(model_name="yolo26m.pt")
-        assert m.model_path == Path("models") / "yolo26m.pt"
+        assert m.model_path == PROJECT_ROOT / "models" / "yolo26m.pt"
 
 
 class TestDisplayConfig:

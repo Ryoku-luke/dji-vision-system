@@ -902,7 +902,7 @@ python export_model.py
 |:----:|:--------:|------|---------|---------|:----:|
 | BUG-01 | **严重** | `detector.py` | `conf_threshold` / `iou_threshold` / `device` 使用 `or` 判断，传入 `0.0` 时被替换为默认值 | 改用 `is not None` 判断 | PASS |
 | BUG-02 | **严重** | `main.py` | VideoWriter 使用请求分辨率而非摄像头实际分辨率 | 从 `cap.get()` 读取实际分辨率 | PASS |
-| BUG-03 | **中等** | `export_model.py` | 模型下载路径相对于 CWD，从其他目录运行时找不到文件 | 临时切换 CWD 到 models_dir，确保权重落在目标目录 | PASS |
+| BUG-03 | **中等** | `export_model.py` / `config.py` | 模型下载路径相对于 CWD，从其他目录运行时找不到文件 | config.py 路径改为基于 PROJECT_ROOT 的绝对路径 + 下载时临时 chdir 到 models_dir | PASS |
 | BUG-04 | **中等** | `main.py` | FP16 精度模式显示为 "FP32" | 修复三元表达式，增加 FP16 分支 | PASS |
 | BUG-05 | **中等** | `export_model.py` | benchmark 结果键名 `inference_time` 与实际返回的 `speed/inference` 不匹配 | 兼容多种键名 | PASS |
 | BUG-06 | **轻微** | `config.py` / `detector.py` / `visualizer.py` | 未使用的导入：`field`、`cv2`、`CLASSES` | 移除无用导入 | PASS |
@@ -978,9 +978,24 @@ python export_model.py
 | TC-03d | 任意目录 | — | 兜底: settings_dir 也能找到 | PASS |
 | TC-03e | 任意目录 | — | 都找不到时抛 FileNotFoundError | PASS |
 
-**代码变更** (`export_model.py`):
+**代码变更** (`config.py` + `export_model.py`):
 
-抽取 `_download_yolo_weights(name, target_dir)` 辅助函数，从根本上修复：
+根本修复分两层:
+
+1. `config.py` 路径基于 `PROJECT_ROOT` 绝对化, 不再受 CWD 影响:
+
+```diff
++ PROJECT_ROOT = Path(__file__).resolve().parent
+
+  @dataclass
+  class ModelConfig:
+-     models_dir: Path = Path("models")
+-     exported_dir: Path = Path("models/exported")
++     models_dir: Path = PROJECT_ROOT / "models"
++     exported_dir: Path = PROJECT_ROOT / "models" / "exported"
+```
+
+2. `export_model.py` 抽取 `_download_yolo_weights(name, target_dir)` 辅助函数, 下载时临时 chdir 到 target_dir:
 
 ```diff
 - yolo = YOLO(name)
@@ -1002,7 +1017,9 @@ python export_model.py
 +     return yolo, target_dir / name
 ```
 
-回归测试: [tests/test_export_model.py](tests/test_export_model.py) 共 6 个用例，覆盖正常路径、CWD 恢复、异常恢复、settings_dir 兜底、找不到时抛错、export_model() 集成衔接。
+真实验证: 从 `/tmp` 运行 `python /workspace/export_model.py`, 权重正确落在 `/workspace/models/yolo26s.pt`, `/tmp` 无遗留。
+
+回归测试: [tests/test_export_model.py](tests/test_export_model.py) 共 6 个用例, 覆盖正常路径、CWD 恢复、异常恢复、settings_dir 兜底、找不到时抛错、export_model() 集成衔接。
 
 ### BUG-04：FP16 精度显示错误 [中等]
 

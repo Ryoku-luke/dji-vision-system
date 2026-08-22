@@ -922,7 +922,7 @@ Four rounds of code review identified **17 bugs in total** (3 severe / 6 medium 
 |:--:|:--------:|------|---------------------|------------|:------:|
 | BUG-01 | **Severe** | `detector.py` | `conf_threshold` / `iou_threshold` / `device` used `or` checks, causing `0.0` to be replaced with defaults | Changed to `is not None` checks | PASS |
 | BUG-02 | **Severe** | `main.py` | VideoWriter used requested resolution instead of camera's actual resolution | Read actual resolution from `cap.get()` | PASS |
-| BUG-03 | **Medium** | `export_model.py` | Model download path was relative to CWD; file not found when run from another directory | Temporarily switch CWD to models_dir so weights land in target dir | PASS |
+| BUG-03 | **Medium** | `export_model.py` / `config.py` | Model download path was relative to CWD; file not found when run from another directory | config.py paths made absolute via PROJECT_ROOT + download temporarily chdirs to models_dir | PASS |
 | BUG-04 | **Medium** | `main.py` | FP16 precision mode displayed as "FP32" | Fixed ternary expression, added FP16 branch | PASS |
 | BUG-05 | **Medium** | `export_model.py` | Benchmark result key `inference_time` did not match the actual returned `speed/inference` | Made compatible with multiple key names | PASS |
 | BUG-06 | **Minor** | `config.py` / `detector.py` / `visualizer.py` | Unused imports: `field`, `cv2`, `CLASSES` | Removed unused imports | PASS |
@@ -1001,9 +1001,24 @@ Four rounds of code review identified **17 bugs in total** (3 severe / 6 medium 
 | TC-03d | Any directory | — | Fallback: weights in settings_dir also found | PASS |
 | TC-03e | Any directory | — | Raises FileNotFoundError when nowhere to be found | PASS |
 
-**Code Changes** (`export_model.py`):
+**Code Changes** (`config.py` + `export_model.py`):
 
-Extracted `_download_yolo_weights(name, target_dir)` helper for a fundamental fix:
+Fundamental fix in two layers:
+
+1. `config.py` paths made absolute via `PROJECT_ROOT`, no longer CWD-dependent:
+
+```diff
++ PROJECT_ROOT = Path(__file__).resolve().parent
+
+  @dataclass
+  class ModelConfig:
+-     models_dir: Path = Path("models")
+-     exported_dir: Path = Path("models/exported")
++     models_dir: Path = PROJECT_ROOT / "models"
++     exported_dir: Path = PROJECT_ROOT / "models" / "exported"
+```
+
+2. `export_model.py` extracted `_download_yolo_weights(name, target_dir)` helper, temporarily chdirs to target_dir during download:
 
 ```diff
 - yolo = YOLO(name)
@@ -1024,6 +1039,8 @@ Extracted `_download_yolo_weights(name, target_dir)` helper for a fundamental fi
 +         ...
 +     return yolo, target_dir / name
 ```
+
+Verified: running `python /workspace/export_model.py` from `/tmp`, weights correctly land in `/workspace/models/yolo26s.pt` with nothing left in `/tmp`.
 
 Regression tests: [tests/test_export_model.py](tests/test_export_model.py) — 6 cases covering the normal path, CWD restoration, exception-safe restoration, settings_dir fallback, not-found error, and export_model() integration.
 

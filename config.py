@@ -10,6 +10,10 @@ from pathlib import Path
 # Language: "zh" (Chinese) or "en" (English)
 LANGUAGE = "zh"
 
+# Project root (this file's directory); ensures paths resolve regardless of CWD.
+# 项目根目录 (本文件所在目录); 确保路径与 CWD 无关, 修复 BUG-03。
+PROJECT_ROOT = Path(__file__).resolve().parent
+
 
 def _detect_api_backend() -> int:
     """Pick the OpenCV VideoCapture backend for the current OS."""
@@ -66,9 +70,10 @@ class ModelConfig:
     conf_threshold: float = 0.5
     iou_threshold: float = 0.5
 
-    # Paths
-    models_dir: Path = Path("models")
-    exported_dir: Path = Path("models/exported")
+    # Paths (absolute, based on PROJECT_ROOT; immune to caller's CWD — BUG-03)
+    # 路径基于 PROJECT_ROOT 的绝对路径, 不受调用方 CWD 影响 (BUG-03)
+    models_dir: Path = PROJECT_ROOT / "models"
+    exported_dir: Path = PROJECT_ROOT / "models" / "exported"
 
     @property
     def model_path(self) -> Path:

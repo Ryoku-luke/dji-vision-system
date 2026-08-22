@@ -1,7 +1,6 @@
 """Unit tests for backend switching, multi-backend config, and device fallback logic."""
 
 import platform
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -10,6 +9,7 @@ from config import (
     CameraConfig,
     ModelConfig,
     _detect_api_backend,
+    PROJECT_ROOT,
 )
 from detector import OpenVINODetector
 
@@ -80,9 +80,9 @@ class TestBackendConfig:
     @pytest.mark.parametrize(
         "backend, expected_path",
         [
-            ("openvino", Path("models/exported/yolo26s_int8_openvino_model")),
-            ("cuda", Path("models/yolo26s.pt")),
-            ("tensorrt", Path("models/exported/yolo26s_int8_engine")),
+            ("openvino", PROJECT_ROOT / "models" / "exported" / "yolo26s_int8_openvino_model"),
+            ("cuda", PROJECT_ROOT / "models" / "yolo26s.pt"),
+            ("tensorrt", PROJECT_ROOT / "models" / "exported" / "yolo26s_int8_engine"),
         ],
     )
     def test_exported_path_by_backend(self, backend, expected_path):
@@ -114,7 +114,7 @@ class TestBackendConfig:
     def test_exported_path_precision_combinations(self, int8, half, precision):
         """Test OpenVINO path generation per precision combination."""
         m = ModelConfig(backend="openvino", int8=int8, half=half)
-        expected = Path("models/exported") / f"yolo26s_{precision}_openvino_model"
+        expected = PROJECT_ROOT / "models" / "exported" / f"yolo26s_{precision}_openvino_model"
         assert m.exported_path == expected
 
     @pytest.mark.parametrize(
@@ -128,20 +128,20 @@ class TestBackendConfig:
     def test_tensorrt_precision_paths(self, int8, half, precision):
         """Test TensorRT path generation per precision / 测试 TensorRT 各精度路径"""
         m = ModelConfig(backend="tensorrt", int8=int8, half=half)
-        expected = Path("models/exported") / f"yolo26s_{precision}_engine"
+        expected = PROJECT_ROOT / "models" / "exported" / f"yolo26s_{precision}_engine"
         assert m.exported_path == expected
 
     def test_int8_takes_priority_over_half(self):
         """When int8=True and half=True, precision is int8 (highest priority)."""
         m = ModelConfig(backend="openvino", int8=True, half=True)
-        expected = Path("models/exported/yolo26s_int8_openvino_model")
+        expected = PROJECT_ROOT / "models" / "exported" / "yolo26s_int8_openvino_model"
         assert m.exported_path == expected
 
     def test_cuda_exported_path_equals_model_path(self):
         """CUDA exported_path equals model_path (uses the raw model directly)."""
         m = ModelConfig(backend="cuda")
         assert m.exported_path == m.model_path
-        assert m.exported_path == Path("models/yolo26s.pt")
+        assert m.exported_path == PROJECT_ROOT / "models" / "yolo26s.pt"
 
 
 class TestDeviceFallback:
