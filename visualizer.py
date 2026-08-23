@@ -74,13 +74,17 @@ class Visualizer:
         """Draw detection results on the frame / 在帧上绘制检测结果."""
         output = frame.copy()
 
-        # Horizontal mirror (for inverted camera mount) / 画面水平镜像 (相机倒装时使用)
-        if mirror:
-            output = cv2.flip(output, 1)
-
-        # Draw detection boxes / 绘制检测框
+        # Draw detection boxes first (using original coordinates) / 先绘制检测框 (使用原始坐标)
         for det in result.detections:
             self._draw_detection(output, det)
+
+        # Horizontal mirror (for inverted camera mount) / 画面水平镜像 (相机倒装时使用)
+        # NOTE: boxes must be drawn BEFORE flip so they mirror with the frame,
+        # otherwise detection boxes land at the mirror-symmetric wrong location.
+        # 注意: 画框必须在 flip 之前执行，这样检测框会随着画面一起镜像；
+        # 若先 flip 再用原始坐标画框，检测框会落在与真实目标镜像对称的错误位置。
+        if mirror:
+            output = cv2.flip(output, 1)
 
         # Update FPS / 更新 FPS
         current_fps = self.fps_counter.update()

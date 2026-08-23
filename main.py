@@ -265,7 +265,9 @@ class VisionSystem:
 
     def _save_screenshot(self, frame: np.ndarray):
         """Save a screenshot / 保存截图."""
-        screenshot_dir = Path("output/screenshots")
+        # Absolute path based on PROJECT_ROOT (BUG-3 fix), immune to caller's CWD.
+        # 基于 PROJECT_ROOT 的绝对路径 (BUG-3 修复), 不受调用方 CWD 影响。
+        screenshot_dir = config.PROJECT_ROOT / "output" / "screenshots"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
         filename = screenshot_dir / f"screenshot_{int(time.time())}.jpg"
         cv2.imwrite(str(filename), frame)
@@ -359,7 +361,8 @@ def parse_classes(class_str: str) -> list[int] | None:
     if not class_str:
         return None
 
-    result = []
+    result: list[int] = []
+    seen: set[int] = set()
     for item in class_str.split(","):
         item = item.strip()
         if not item:
@@ -367,13 +370,22 @@ def parse_classes(class_str: str) -> list[int] | None:
         if item.isdigit():
             cls_id = int(item)
             if 0 <= cls_id < len(CLASSES):
-                result.append(cls_id)
+                if cls_id not in seen:
+                    seen.add(cls_id)
+                    result.append(cls_id)
+                else:
+                    logger.warning(t("class_duplicate_skipped", id=cls_id, name=CLASSES[cls_id]))
             else:
                 logger.warning(t("class_id_oor", id=cls_id, max=len(CLASSES) - 1))
         else:
             # Look up by name / 按名称查找
             if item in CLASSES:
-                result.append(CLASSES.index(item))
+                cls_id = CLASSES.index(item)
+                if cls_id not in seen:
+                    seen.add(cls_id)
+                    result.append(cls_id)
+                else:
+                    logger.warning(t("class_duplicate_skipped", id=cls_id, name=item))
             else:
                 logger.warning(t("class_unknown", name=item))
 

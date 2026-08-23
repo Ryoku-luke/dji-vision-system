@@ -42,7 +42,9 @@ DOWNLOAD_URL_TEMPLATE = (
 )
 
 # Project root and exported dir / 项目根目录与导出目录
-PROJECT_ROOT = Path(__file__).parent
+# Use resolve() for consistency with config.py PROJECT_ROOT (BUG-4).
+# 使用 resolve() 与 config.py 中 PROJECT_ROOT 保持一致 (BUG-4)。
+PROJECT_ROOT = Path(__file__).resolve().parent
 EXPORTED_DIR = PROJECT_ROOT / "models" / "exported"
 
 # Available models and reference info / 可用模型列表及其参考信息

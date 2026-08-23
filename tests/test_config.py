@@ -133,10 +133,12 @@ class TestDisplayConfig:
         assert d.font_scale == 0.6
         assert d.mirror is False
         assert d.save_output is False
-        assert d.output_path == Path("output/result.mp4")
+        # BUG-3 fix: paths are absolute relative to PROJECT_ROOT, immune to CWD.
+        # BUG-3 修复: 路径为基于 PROJECT_ROOT 的绝对路径, 不受调用方 CWD 影响。
+        assert d.output_path == PROJECT_ROOT / "output" / "result.mp4"
         assert d.output_fps == 30
         assert d.log_detections is False
-        assert d.log_path == Path("output/detections.csv")
+        assert d.log_path == PROJECT_ROOT / "output" / "detections.csv"
 
 
 class TestCocoClasses:

@@ -195,8 +195,17 @@ class CameraCapture:
 
     def close(self):
         """Release camera resources."""
+        # Defensive: cv2 may be set to None during interpreter shutdown (BUG-6).
+        # 防御式: 解释器关闭阶段 cv2 可能被置为 None (BUG-6)。
         if self.cap is not None:
-            self.cap.release()
+            try:
+                import cv2 as _cv2  # noqa: WPS433
+                if _cv2 is not None:
+                    self.cap.release()
+            except Exception:
+                # Ignore any release errors during teardown; avoid polluting stderr.
+                # 关闭阶段的 release 错误一律忽略，避免污染 stderr。
+                pass
             self.cap = None
         self._is_running = False
         logger.info(t("camera_closed"))

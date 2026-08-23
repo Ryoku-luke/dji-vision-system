@@ -110,10 +110,12 @@ class DisplayConfig:
     font_scale: float = 0.6
     mirror: bool = False
     save_output: bool = False
-    output_path: Path = Path("output/result.mp4")
+    # Absolute paths based on PROJECT_ROOT so outputs don't depend on caller's CWD (BUG-3).
+    # 路径基于 PROJECT_ROOT 的绝对路径, 输出文件与调用方 CWD 无关 (BUG-3)。
+    output_path: Path = PROJECT_ROOT / "output" / "result.mp4"
     output_fps: int = 30
     log_detections: bool = False
-    log_path: Path = Path("output/detections.csv")
+    log_path: Path = PROJECT_ROOT / "output" / "detections.csv"
 
 
 # COCO 80 classes (YOLO default)

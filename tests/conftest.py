@@ -3,6 +3,7 @@
 import sys
 import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,8 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
 try:
     import cv2  # noqa: F401  try importing real cv2
 except ImportError:
-    from unittest.mock import MagicMock
-
     _cv2_stub = types.ModuleType("cv2")
 
     # OpenCV constant stubs (values match the official constants)
@@ -48,6 +47,23 @@ except ImportError:
     _cv2_stub.flip = MagicMock()
 
     sys.modules["cv2"] = _cv2_stub
+
+
+# Stub ultralytics module when not installed (BUG-2 fix) / 未安装 ultralytics 时注入桩模块
+# 防止 patch("ultralytics.YOLO") 在打补丁前触发 import ultralytics 导致 ModuleNotFoundError
+if "ultralytics" not in sys.modules:
+    try:
+        import ultralytics  # noqa: F401
+    except ImportError:
+        _ultralytics_stub = types.ModuleType("ultralytics")
+        _ultralytics_stub.YOLO = MagicMock()
+        sys.modules["ultralytics"] = _ultralytics_stub
+
+        # ultralytics.utils submodule with SETTINGS dict stub
+        _ultralytics_utils_stub = types.ModuleType("ultralytics.utils")
+        _ultralytics_utils_stub.SETTINGS = {"weights_dir": ""}
+        sys.modules["ultralytics.utils"] = _ultralytics_utils_stub
+        _ultralytics_stub.utils = _ultralytics_utils_stub
 
 
 @pytest.fixture

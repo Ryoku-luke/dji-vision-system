@@ -77,6 +77,7 @@ _MSG = {
     # ---- class filter ----
     "class_id_oor": {"zh": "类别 ID {id} 超出范围 (0-{max}), 已忽略", "en": "Class ID {id} out of range (0-{max}), skipped"},
     "class_unknown": {"zh": "未知类别名称: {name}, 已忽略", "en": "Unknown class name: {name}, skipped"},
+    "class_duplicate_skipped": {"zh": "重复类别: ID {id} ({name}), 已跳过重复项", "en": "Duplicate class: ID {id} ({name}), duplicate skipped"},
     # ---- video writer ----
     "video_out_created": {"zh": "视频输出: {path} ({w}x{h} @ {fps}fps)", "en": "Video output: {path} ({w}x{h} @ {fps}fps)"},
     "video_out_fail": {"zh": "无法创建视频文件: {path}", "en": "Cannot create video file: {path}"},

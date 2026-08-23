@@ -133,10 +133,10 @@ jobs:
         run: |
           echo "正在运行 pylint 代码质量检查 (评分阈值 6.0)..."
           find . -maxdepth 1 -name "*.py" -print0 | \
-            xargs -0 pylint --fail-under=6.0
+            xargs -0 pylint --rcfile=.pylintrc --fail-under=6.0
 
       - name: 运行 mypy
         run: |
           echo "正在运行 mypy 类型检查..."
           find . -maxdepth 1 -name "*.py" -print0 | \
-            xargs -0 mypy
+            xargs -0 mypy --config-file=mypy.ini

@@ -56,9 +56,13 @@ class TestParseClasses:
         """Empty items from consecutive commas are skipped / 连续逗号产生的空项被跳过"""
         assert parse_classes("person,,car,") == [0, 2]
 
-    def test_preserves_order_and_duplicates(self):
-        """Input order and duplicates are preserved / 保留输入顺序与重复项"""
-        assert parse_classes("car,person,car") == [2, 0, 2]
+    def test_duplicates_deduplicated_without_order_change(self):
+        """Duplicate IDs/names are deduplicated, first occurrence order is preserved (BUG-7).
+        重复 ID/名称被去重，保留首次出现顺序 (BUG-7)。"""
+        # "car,person,car" => deduplicated to [2, 0] (order of first occurrence)
+        # "person,person,0,2" => person and 0 both resolve to ID 0, so [0, 2]
+        assert parse_classes("car,person,car") == [2, 0]
+        assert parse_classes("person,person,0,2") == [0, 2]
 
     def test_boundary_ids(self):
         """Boundary IDs (0 and 79) are valid / 边界 ID (0 与 79) 均有效"""

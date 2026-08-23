@@ -16,6 +16,7 @@ import sys
 import shutil
 import logging
 from pathlib import Path
+from typing import Any
 
 # Add project root to path / 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
@@ -25,7 +26,7 @@ from config import MODEL
 logger = logging.getLogger(__name__)
 
 
-def _download_yolo_weights(name: str, target_dir: Path) -> "tuple":
+def _download_yolo_weights(name: str, target_dir: Path) -> "tuple[Any, Path]":
     """Download YOLO weights into target_dir, robust to the caller's CWD.
     下载 YOLO 权重到 target_dir，对调用方的工作目录鲁棒。
 
