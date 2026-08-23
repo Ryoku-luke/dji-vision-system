@@ -301,13 +301,15 @@ class ModelDownloader:
         return model_dir
 
     def _verify_model(self, model_dir: Path, model_name: str) -> bool:
-        """Verify model file integrity based on backend type."""
-        cfg = BACKEND_CONFIG.get(self.backend, BACKEND_CONFIG["openvino"])
+        """Verify model file integrity based on backend type.
+
+        For OpenVINO, model_dir is the directory containing .xml/.bin.
+        For CUDA, model_dir is the .pt file path directly.
+        """
         if self.backend == "cuda":
-            # CUDA: verify .pt file exists
-            pt_file = self.exported_dir / f"{model_name}.pt"
-            if not pt_file.exists():
-                print(f"Error: missing model file / 错误: 缺少模型文件: {pt_file.name}")
+            # CUDA: verify .pt file exists (model_dir IS the .pt file)
+            if not model_dir.exists() or not model_dir.is_file():
+                print(f"Error: missing model file / 错误: 缺少模型文件: {model_dir.name}")
                 return False
             return True
         else:
@@ -468,7 +470,7 @@ class ModelDownloader:
 
             # Step 4: verify model files / 第 4 步: 验证模型文件
             print(f"\n[4/4] Verifying model files / 验证模型文件...")
-            if not self._verify_model(model_dir if needs_extract else self.exported_dir, model_name):
+            if not self._verify_model(model_dir, model_name):
                 return False
             print(f"  Verification passed: all required files present / 验证通过: 所有必要文件均存在")
 

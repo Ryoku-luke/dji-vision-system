@@ -308,6 +308,10 @@ class OpenVINODetector:
         if not self._is_loaded:
             return
 
+        if iterations <= 0:
+            logger.warning(t("model_warmup_skip", iterations=iterations))
+            return
+
         logger.info(t("model_warmup", iterations=iterations))
         dummy = np.zeros((MODEL.imgsz, MODEL.imgsz, 3), dtype=np.uint8)
 

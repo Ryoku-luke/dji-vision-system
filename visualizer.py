@@ -192,9 +192,13 @@ class Visualizer:
         cv2.rectangle(overlay, (0, 0), (panel_w, panel_h), (0, 0, 0), cv2.FILLED)
         cv2.addWeighted(overlay, 0.6, roi, 0.4, 0, roi)
 
-        # Draw text / 绘制文字
+        # Draw text / 绘制文字 (仅绘制在面板范围内的行, 避免越界)
         for i, line in enumerate(lines):
             y = padding + (i + 1) * line_height - 6
+            # Stop if text would exceed the clamped panel bottom
+            # 如果文字基线超出面板底部则停止绘制
+            if y >= panel_h:
+                break
             cv2.putText(
                 frame,
                 line,

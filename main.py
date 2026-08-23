@@ -267,7 +267,9 @@ class VisionSystem:
         """Save a screenshot / 保存截图."""
         screenshot_dir = Path("output/screenshots")
         screenshot_dir.mkdir(parents=True, exist_ok=True)
-        filename = screenshot_dir / f"screenshot_{int(time.time())}.jpg"
+        # Use millisecond precision to avoid overwriting rapid screenshots
+        # 使用毫秒级精度, 避免快速截图时文件名冲突
+        filename = screenshot_dir / f"screenshot_{int(time.time() * 1000)}.jpg"
         cv2.imwrite(str(filename), frame)
         logger.info(t("screenshot_saved", path=filename))
 
