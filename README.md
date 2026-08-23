@@ -1248,20 +1248,161 @@ python export_model.py
 + logger.info(f"  后端: {MODEL.backend.upper()} | YOLO + {backend_display}")
 ```
 
+### BUG-15：镜像模式下检测框位置错位 [严重]
+
+**问题描述**: `visualizer.py` 中 `Visualizer.draw()` 先对帧执行 `cv2.flip(1)` 水平镜像，再使用未镜像的原始 bbox 坐标绘制检测框。结果是所有检测框都画在了与真实目标镜像对称的错误位置，倒装相机场景下完全不可用。
+
+**代码变更** (`visualizer.py`):
+
+```diff
+- if mirror:
+-     output = cv2.flip(output, 1)
+- for det in result.detections:
+-     self._draw_detection(output, det)
++ # 先画框再镜像, 让检测框和画面一起翻转到正确位置
++ for det in result.detections:
++     self._draw_detection(output, det)
++ if mirror:
++     output = cv2.flip(output, 1)
+```
+
+### BUG-16：未安装 ultralytics 时 test_export_model 因导入失败被阻塞 [严重]
+
+**问题描述**: `tests/test_export_model.py` 中使用 `patch("ultralytics.YOLO", ...)`。`unittest.mock` 在打补丁前会真实 `import ultralytics`，未安装 ultralytics 的 CI 环境（只装了 pytest / numpy / stub cv2）直接 `ModuleNotFoundError`，导致 6 个 BUG-03 回归测试中 5 个失败。
+
+**代码变更** (`tests/conftest.py`):
+
+```diff
++ # ultralytics 未安装时注入 ModuleType stub (含 .YOLO 与 .utils.SETTINGS)
++ if "ultralytics" not in sys.modules:
++     try:
++         import ultralytics
++     except ImportError:
++         _ultralytics_stub = types.ModuleType("ultralytics")
++         _ultralytics_stub.YOLO = MagicMock()
++         sys.modules["ultralytics"] = _ultralytics_stub
++         _utils = types.ModuleType("ultralytics.utils")
++         _utils.SETTINGS = {"weights_dir": ""}
++         sys.modules["ultralytics.utils"] = _utils
++         _ultralytics_stub.utils = _utils
+```
+
+### BUG-17：输出路径 / 检测日志 / 截图目录仍依赖调用方 CWD [中等]（BUG-03 姊妹问题）
+
+**问题描述**: BUG-03 已修复 `models_dir` / `exported_dir` 改为基于 `PROJECT_ROOT` 的绝对路径，但 `DisplayConfig.output_path`、`log_path` 以及 `_save_screenshot()` 中的 `output/screenshots` 仍使用相对路径。从 `/tmp` 执行 `python /workspace/main.py --save --log-detections` 时，输出文件会散落至 `/tmp/output/...`，不在项目目录中。
+
+**代码变更** (`config.py` / `main.py`):
+
+```diff
+  @dataclass
+  class DisplayConfig:
+-     output_path: Path = Path("output/result.mp4")
+-     log_path: Path = Path("output/detections.csv")
++     output_path: Path = PROJECT_ROOT / "output" / "result.mp4"
++     log_path: Path = PROJECT_ROOT / "output" / "detections.csv"
+
+  # main.py / _save_screenshot
+- screenshot_dir = Path("output/screenshots")
++ screenshot_dir = config.PROJECT_ROOT / "output" / "screenshots"
+```
+
+### BUG-18：download_model.py PROJECT_ROOT 缺少 resolve() 与 config.py 不一致 [轻微]
+
+**问题描述**: `download_model.py` 中 `PROJECT_ROOT = Path(__file__).parent`，而 config.py 中为 `Path(__file__).resolve().parent`。若脚本通过符号链接被引用，两处 PROJECT_ROOT 可能解析为不同路径，导致下载到的预导出模型与运行时查找路径错位。
+
+**代码变更** (`download_model.py`):
+
+```diff
+- PROJECT_ROOT = Path(__file__).parent
++ PROJECT_ROOT = Path(__file__).resolve().parent
+```
+
+### BUG-19：`_download_yolo_weights` 返回类型注解过于粗糙 [轻微]
+
+**问题描述**: 函数签名 `-> "tuple"` 不描述元素结构，docstring 实际返回 `(yolo, model_path)` 两元组。类型检查器无法识别，mypy 下游调用 `.exists()` 会报类型错误。
+
+**代码变更** (`export_model.py`):
+
+```diff
++ from typing import Any
+- def _download_yolo_weights(name: str, target_dir: Path) -> "tuple":
++ def _download_yolo_weights(name: str, target_dir: Path) -> "tuple[Any, Path]":
+```
+
+### BUG-20：CameraCapture.__del__ 在解释器关闭阶段可能引用已清理的 cv2 [轻微]
+
+**问题描述**: `__del__` 调用 `self.close()` 进而 `self.cap.release()`，而 `close()` 依赖模块级 `import cv2`。Python 解释器退出阶段模块析构顺序不确定，若 `cv2` 已被置为 None，会抛出 `AttributeError: 'NoneType' object has no attribute 'release'` 污染 stderr。
+
+**代码变更** (`camera_capture.py`):
+
+```diff
+  def close(self):
+-     if self.cap is not None:
+-         self.cap.release()
++     if self.cap is not None:
++         try:
++             import cv2 as _cv2
++             if _cv2 is not None:
++                 self.cap.release()
++         except Exception:
++             pass
+          self.cap = None
+```
+
+### BUG-21：parse_classes 不去重导致重复类别进入过滤列表 [轻微]
+
+**问题描述**: `parse_classes("person,person,0")` 返回 `[0, 0, 0]`。现有测试 `test_preserves_order_and_duplicates` 甚至把"保留重复"当预期。ultralytics 虽大概率忽略重复 classes，但日志显示 `类别过滤: ['person','person','person']` 明显不规范。
+
+**代码变更** (`main.py` / `messages.py` / `tests/test_main.py`):
+
+```diff
+  def parse_classes(class_str: str) -> list[int] | None:
+      if not class_str:
+          return None
+      result: list[int] = []
++     seen: set[int] = set()
+      for item in class_str.split(","):
+          ...
+          if 0 <= cls_id < len(CLASSES):
++             if cls_id not in seen:
++                 seen.add(cls_id)
+-                 result.append(cls_id)
++                 result.append(cls_id)
++             else:
++                 logger.warning(t("class_duplicate_skipped", id=cls_id, name=CLASSES[cls_id]))
+```
+
+### BUG-22：CI pylint/mypy 未显式指定 rcfile/config-file [轻微]
+
+**问题描述**: `ci.yml` 中 `find . -name "*.py" -print0 | xargs -0 pylint --fail-under=6.0` / `mypy` 未显式指定 `--rcfile=.pylintrc` / `--config-file=mypy.ini`，在某些 xargs 子进程 cwd 场景下可能找不到项目根的配置，导致 `max-line-length=200` 等规则失效而误报。
+
+**代码变更** (`.github/workflows/ci.yml`):
+
+```diff
+- find . -maxdepth 1 -name "*.py" -print0 | xargs -0 pylint --fail-under=6.0
++ find . -maxdepth 1 -name "*.py" -print0 | xargs -0 pylint --rcfile=.pylintrc --fail-under=6.0
+- find . -maxdepth 1 -name "*.py" -print0 | xargs -0 mypy
++ find . -maxdepth 1 -name "*.py" -print0 | xargs -0 mypy --config-file=mypy.ini
+```
+
 ### 语法验证结果
 
-使用 Python 内置的 `py_compile` 模块对所有修改过的源码文件进行语法检查：
+使用 Python 内置的 `py_compile` 模块对本轮修改过的源码与测试文件进行语法检查：
 
 | 文件 | 命令 | 状态 |
 |------|------|:----:|
 | `config.py` | `python -m py_compile config.py` | PASS |
-| `camera_capture.py` | `python -m py_compile camera_capture.py` | PASS |
-| `detector.py` | `python -m py_compile detector.py` | PASS |
 | `export_model.py` | `python -m py_compile export_model.py` | PASS |
-| `visualizer.py` | `python -m py_compile visualizer.py` | PASS |
 | `main.py` | `python -m py_compile main.py` | PASS |
+| `visualizer.py` | `python -m py_compile visualizer.py` | PASS |
+| `camera_capture.py` | `python -m py_compile camera_capture.py` | PASS |
+| `download_model.py` | `python -m py_compile download_model.py` | PASS |
+| `messages.py` | `python -m py_compile messages.py` | PASS |
+| `tests/conftest.py` | `python -m py_compile tests/conftest.py` | PASS |
+| `tests/test_config.py` | `python -m py_compile tests/test_config.py` | PASS |
+| `tests/test_main.py` | `python -m py_compile tests/test_main.py` | PASS |
 
-全部 6 个文件语法检查通过，退出码为 0，无任何编译错误或警告。
+全部 10 个文件语法检查通过，退出码为 0，无任何编译错误或警告。
 
 ### 风险评估
 
@@ -1281,13 +1422,21 @@ python export_model.py
 | BUG-12 (视频 FPS falsy) | **低** | 与 BUG-08 同类, 仅影响视频文件 FPS 读取, 语义不明确 |
 | BUG-13 (提示不区分后端) | **低** | CUDA 用户收到错误的导出提示, 不影响功能 |
 | BUG-14 (后端名称 fallback) | **低** | 仅在未知后端时显示错误名称, 当前支持的三种后端不受影响 |
+| BUG-15 (镜像 bbox 错位) | **高** | 所有检测框画在镜像对称的错误位置，倒装相机场景完全不可用；已通过先画框后镜像修复 |
+| BUG-16 (ultralytics 未安装阻塞单测) | **高** | CI 仅装 stub cv2 / pytest 时，5/6 个 BUG-03 回归测试失败；已通过 conftest ultralytics ModuleType stub 修复 |
+| BUG-17 (输出路径依赖 CWD) | **中** | 视频、检测日志、截图从非项目根目录执行时会散落至调用方 CWD；已全部改为 PROJECT_ROOT 绝对路径 |
+| BUG-18 (download_model resolve 缺失) | **低** | 符号链接引用场景下可能与 config.py PROJECT_ROOT 解析错位；已补齐 resolve() |
+| BUG-19 (返回类型注解 tuple 粗糙) | **低** | mypy 无法识别返回的两元组结构，调用 `.exists()` 会报类型错误；已改为 tuple[Any, Path] |
+| BUG-20 (__del__ cv2 已清理) | **低** | Python 退出阶段 cv2 为 None 时污染 stderr 告警；已局部 re-import + try/except 保护 |
+| BUG-21 (parse_classes 不去重) | **低** | 日志中类别过滤列表显示重复项；已引入 seen 集合去重并输出警告 |
+| BUG-22 (CI 未指定 rcfile) | **低** | xargs 子进程 cwd 场景下可能无法发现 pylint/mypy 配置；已显式加 --rcfile / --config-file |
 
 ### 后续建议
 
-1. ~~**集成单元测试框架**~~: 已完成 - 106 个 pytest 用例覆盖核心模块、跨平台后端、多后端推理
+1. ~~**集成单元测试框架**~~: 已完成 - 112 个 pytest 用例覆盖核心模块、跨平台后端、多后端推理、BUG-03 下载/权重回归
 2. **端到端集成测试**: 在真实 DJI 相机 + Intel 155H 硬件环境下验证 UVC 采集 → OpenVINO 推理 → 可视化输出完整链路
-3. ~~**CI/CD 流水线**~~: 已完成 - GitHub Actions 配置了 py_compile 语法检查、pytest 单元测试、pylint/mypy 代码质量检查
-4. **类型注解强化**: 使用 `mypy` 进行静态类型检查，从类型层面预防 BUG-01 类 falsy 判断问题
+3. ~~**CI/CD 流水线**~~: 已完成 - GitHub Actions 配置了 py_compile 语法检查、pytest 单元测试、pylint/mypy 代码质量检查 (rcfile 显式指定)
+4. ~~**类型注解强化**~~: 已完成 - `mypy --config-file=mypy.ini` 8 个源文件 0 issues，从类型层面预防 BUG-01/BUG-19 类问题
 5. **预导出模型上传**: 将 INT8 模型上传到 GitHub Release, 使 `download_model.py` 可直接下载使用
 
 ---
@@ -1301,7 +1450,7 @@ python export_model.py
 | Ultralytics | 8.4+ | YOLO26 模型管理 |
 | OpenCV | 4.9+ | 跨平台 UVC 采集 (Windows/Linux/macOS) |
 | NumPy | 1.24+ | 数组运算 |
-| pytest | 8.0+ | 单元测试框架 (106 个用例) |
+| pytest | 8.0+ | 单元测试框架 (112 个用例) |
 | PyTorch | 2.0+ | CUDA 后端 (可选, 仅 NVIDIA, 需 CUDA 版安装) |
 | TensorRT | 8.6+ | TensorRT 后端 (可选, 仅 NVIDIA, 不支持 macOS) |
 

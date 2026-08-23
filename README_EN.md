@@ -1347,20 +1347,162 @@ Regression tests: [tests/test_export_model.py](tests/test_export_model.py) — 6
 +     logger.error("  Or download a pre-exported model: python download_model.py")
 ```
 
+### BUG-18: Detection boxes drawn at wrong location in mirror mode [Critical]
+
+**Problem**: In `Visualizer.draw()` the frame was flipped horizontally with `cv2.flip(1)` *first*, then detection boxes were drawn using the original un-flipped bbox coordinates. As a result every box landed at the mirror-symmetric position of its real target, making the `--flip` (inverted camera) mode completely unusable.
+
+**Code Changes** (`visualizer.py`):
+
+```diff
+- if mirror:
+-     output = cv2.flip(output, 1)
+- for det in result.detections:
+-     self._draw_detection(output, det)
++ # Draw boxes BEFORE flip so boxes mirror along with the content
++ for det in result.detections:
++     self._draw_detection(output, det)
++ if mirror:
++     output = cv2.flip(output, 1)
+```
+
+### BUG-19: test_export_model blocked by missing ultralytics import on CI [Critical]
+
+**Problem**: `tests/test_export_model.py` uses `patch("ultralytics.YOLO", ...)`. `unittest.mock` actually imports the real `ultralytics` module before applying the patch, so in CI environments that only install pytest / numpy / stub cv2 (not ultralytics), the import raises `ModuleNotFoundError` and 5 out of 6 BUG-03 regression tests fail.
+
+**Code Changes** (`tests/conftest.py`):
+
+```diff
++ # Inject a ModuleType stub for ultralytics when it is not installed
++ # (provides .YOLO MagicMock + .utils.SETTINGS dict stub)
++ if "ultralytics" not in sys.modules:
++     try:
++         import ultralytics
++     except ImportError:
++         _ultralytics_stub = types.ModuleType("ultralytics")
++         _ultralytics_stub.YOLO = MagicMock()
++         sys.modules["ultralytics"] = _ultralytics_stub
++         _utils = types.ModuleType("ultralytics.utils")
++         _utils.SETTINGS = {"weights_dir": ""}
++         sys.modules["ultralytics.utils"] = _utils
++         _ultralytics_stub.utils = _utils
+```
+
+### BUG-20: Output video / log / screenshot paths still depend on caller's CWD [Medium] (BUG-03 sibling)
+
+**Problem**: BUG-03 fixed `models_dir` / `exported_dir` to be absolute paths rooted at `PROJECT_ROOT`, but `DisplayConfig.output_path`, `log_path`, and the `output/screenshots` dir hardcoded inside `_save_screenshot()` were still relative. Running `python /workspace/main.py --save --log-detections` from `/tmp` scattered outputs into `/tmp/output/...` instead of the project directory.
+
+**Code Changes** (`config.py` / `main.py`):
+
+```diff
+  @dataclass
+  class DisplayConfig:
+-     output_path: Path = Path("output/result.mp4")
+-     log_path: Path = Path("output/detections.csv")
++     output_path: Path = PROJECT_ROOT / "output" / "result.mp4"
++     log_path: Path = PROJECT_ROOT / "output" / "detections.csv"
+
+  # main.py / _save_screenshot
+- screenshot_dir = Path("output/screenshots")
++ screenshot_dir = config.PROJECT_ROOT / "output" / "screenshots"
+```
+
+### BUG-21: download_model.py PROJECT_ROOT missing resolve(), inconsistent with config.py [Minor]
+
+**Problem**: `download_model.py` used `PROJECT_ROOT = Path(__file__).parent` while `config.py` uses `Path(__file__).resolve().parent`. When scripts are referenced through a symlink, the two PROJECT_ROOT values can resolve to different paths, causing pre-exported downloads to be placed at a path the runtime never looks at.
+
+**Code Changes** (`download_model.py`):
+
+```diff
+- PROJECT_ROOT = Path(__file__).parent
++ PROJECT_ROOT = Path(__file__).resolve().parent
+```
+
+### BUG-22: _download_yolo_weights return type annotation is too vague [Minor]
+
+**Problem**: The signature `-> "tuple"` does not describe the two-element structure the docstring promises `(yolo, model_path)`. Type checkers cannot infer `.exists()` downstream and mypy reports errors on callers.
+
+**Code Changes** (`export_model.py`):
+
+```diff
++ from typing import Any
+- def _download_yolo_weights(name: str, target_dir: Path) -> "tuple":
++ def _download_yolo_weights(name: str, target_dir: Path) -> "tuple[Any, Path]":
+```
+
+### BUG-23: CameraCapture.__del__ can reference torn-down cv2 during interpreter shutdown [Minor]
+
+**Problem**: `__del__` calls `self.close()` which in turn calls `self.cap.release()` via the module-level `cv2` import. During interpreter shutdown module destruction order is undefined; if `cv2` has been set to `None`, the call throws `AttributeError: 'NoneType' object has no attribute 'release'` and pollutes stderr.
+
+**Code Changes** (`camera_capture.py`):
+
+```diff
+  def close(self):
+-     if self.cap is not None:
+-         self.cap.release()
++     if self.cap is not None:
++         try:
++             import cv2 as _cv2
++             if _cv2 is not None:
++                 self.cap.release()
++         except Exception:
++             pass
+          self.cap = None
+```
+
+### BUG-24: parse_classes did not deduplicate, duplicates leaked into class filter [Minor]
+
+**Problem**: `parse_classes("person,person,0")` returned `[0, 0, 0]`. The existing test `test_preserves_order_and_duplicates` even treated "keeping duplicates" as the expected behavior. Ultralytics mostly ignores duplicate class lists, but the filter log (e.g. `['person','person','person']`) looked clearly wrong and unpolished.
+
+**Code Changes** (`main.py` / `messages.py` / `tests/test_main.py`):
+
+```diff
+  def parse_classes(class_str: str) -> list[int] | None:
+      if not class_str:
+          return None
+      result: list[int] = []
++     seen: set[int] = set()
+      for item in class_str.split(","):
+          ...
+          if 0 <= cls_id < len(CLASSES):
++             if cls_id not in seen:
++                 seen.add(cls_id)
+-                 result.append(cls_id)
++                 result.append(cls_id)
++             else:
++                 logger.warning(t("class_duplicate_skipped", id=cls_id, name=CLASSES[cls_id]))
+```
+
+### BUG-25: CI pylint / mypy did not explicitly point at rcfile / config-file [Minor]
+
+**Problem**: In `ci.yml` the pipeline ran `find . -name "*.py" -print0 | xargs -0 pylint --fail-under=6.0` / `mypy` without `--rcfile=.pylintrc` / `--config-file=mypy.ini`. In certain xargs-subprocess-cwd scenarios the project-root config was not discovered, causing rules like `max-line-length=200` to silently drop and trigger spurious lint warnings.
+
+**Code Changes** (`.github/workflows/ci.yml`):
+
+```diff
+- find . -maxdepth 1 -name "*.py" -print0 | xargs -0 pylint --fail-under=6.0
++ find . -maxdepth 1 -name "*.py" -print0 | xargs -0 pylint --rcfile=.pylintrc --fail-under=6.0
+- find . -maxdepth 1 -name "*.py" -print0 | xargs -0 mypy
++ find . -maxdepth 1 -name "*.py" -print0 | xargs -0 mypy --config-file=mypy.ini
+```
+
 ### Syntax Validation Results
 
-All modified source files were syntax-checked using Python's built-in `py_compile` module:
+All modified source + test files in this round were syntax-checked using Python's built-in `py_compile` module:
 
 | File | Command | Status |
 |------|---------|:------:|
 | `config.py` | `python -m py_compile config.py` | PASS |
-| `camera_capture.py` | `python -m py_compile camera_capture.py` | PASS |
-| `detector.py` | `python -m py_compile detector.py` | PASS |
 | `export_model.py` | `python -m py_compile export_model.py` | PASS |
-| `visualizer.py` | `python -m py_compile visualizer.py` | PASS |
 | `main.py` | `python -m py_compile main.py` | PASS |
+| `visualizer.py` | `python -m py_compile visualizer.py` | PASS |
+| `camera_capture.py` | `python -m py_compile camera_capture.py` | PASS |
+| `download_model.py` | `python -m py_compile download_model.py` | PASS |
+| `messages.py` | `python -m py_compile messages.py` | PASS |
+| `tests/conftest.py` | `python -m py_compile tests/conftest.py` | PASS |
+| `tests/test_config.py` | `python -m py_compile tests/test_config.py` | PASS |
+| `tests/test_main.py` | `python -m py_compile tests/test_main.py` | PASS |
 
-All 6 files passed syntax checks with exit code 0, with no compilation errors or warnings.
+All 10 files passed syntax checks with exit code 0, with no compilation errors or warnings.
 
 ### Risk Assessment
 
@@ -1383,14 +1525,22 @@ All 6 files passed syntax checks with exit code 0, with no compilation errors or
 | BUG-15 (private attribute access) | **Low** | No functional impact; breaks encapsulation and creates a maintenance risk |
 | BUG-16 (benchmark return type) | **Medium** | Crashes the export script when benchmark fails; now handled gracefully |
 | BUG-17 (CUDA model-not-found message) | **Low** | Misleading prompt for CUDA users; no functional impact |
+| BUG-18 (mirror bbox mis-draw) | **High** | Every detection box lands at the mirror-symmetric wrong location; `--flip` mode was completely broken. Fixed by drawing boxes BEFORE flipping |
+| BUG-19 (missing ultralytics import blocks CI) | **High** | 5/6 BUG-03 regression tests failed when ultralytics was not installed. Fixed via conftest ModuleType stub |
+| BUG-20 (output paths depend on CWD) | **Medium** | Video / log / screenshot outputs scattered into caller's CWD when running from outside project root; all now anchored at PROJECT_ROOT |
+| BUG-21 (download_model PROJECT_ROOT no resolve) | **Low** | Symlink invocation could mismatch with config.py PROJECT_ROOT; `resolve()` added to align behavior |
+| BUG-22 (vague tuple return annotation) | **Low** | mypy could not infer the two-tuple structure; signature upgraded to `tuple[Any, Path]` |
+| BUG-23 (__del__ referencing torn-down cv2) | **Low** | Could pollute stderr with AttributeError during interpreter shutdown; now locally re-imports + try/except protects close() |
+| BUG-24 (parse_classes duplicated entries) | **Low** | Duplicate IDs / names leaked into the class filter and appeared in logs; now deduplicated with order preserved and warnings emitted |
+| BUG-25 (CI pylint/mypy missing rcfile flag) | **Low** | Project-level rcfile / mypy.ini could be missed by xargs subprocesses; now explicitly passed via `--rcfile` / `--config-file` |
 
 ### Next Steps
 
-1. ~~**Integrate unit test framework**~~: Completed — 106 pytest cases covering core modules, cross-platform backends, and multi-backend inference
+1. ~~**Integrate unit test framework**~~: Completed — 112 pytest cases covering core modules, cross-platform backends, multi-backend inference, and BUG-03 download/weight regression
 2. **End-to-end integration testing**: Validate the full UVC capture → OpenVINO inference → visualization output pipeline on real DJI camera + Intel 155H hardware
-3. ~~**CI/CD pipeline**~~: Completed — GitHub Actions configured with py_compile syntax checks, pytest unit tests, and pylint/mypy code quality checks
+3. ~~**CI/CD pipeline**~~: Completed — GitHub Actions configured with py_compile syntax checks, pytest unit tests, and pylint/mypy code quality checks (rcfile/config-file flags now explicit)
 4. ~~**i18n support**~~: Completed — `messages.py` i18n module with `--lang en` CLI option for English/Chinese message switching
-5. **Strengthen type annotations**: Use `mypy` for static type checking to prevent BUG-01-class falsy check issues at the type level
+5. ~~**Strengthen type annotations**~~: Completed — `mypy --config-file=mypy.ini` 0 issues across 8 source files; prevents BUG-01 / BUG-22 class type issues statically
 6. **Upload pre-exported models**: Upload INT8 models to GitHub Release so `download_model.py` can download them directly
 
 ---
@@ -1404,7 +1554,7 @@ All 6 files passed syntax checks with exit code 0, with no compilation errors or
 | Ultralytics | 8.4+ | YOLO26 model management |
 | OpenCV | 4.9+ | Cross-platform UVC capture (Windows/Linux/macOS) |
 | NumPy | 1.24+ | Array operations |
-| pytest | 8.0+ | Unit test framework (106 cases) |
+| pytest | 8.0+ | Unit test framework (112 cases) |
 | PyTorch | 2.0+ | CUDA backend (optional, NVIDIA only, requires CUDA edition) |
 | TensorRT | 8.6+ | TensorRT backend (optional, NVIDIA only, macOS not supported) |
 
