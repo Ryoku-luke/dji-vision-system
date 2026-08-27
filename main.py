@@ -47,20 +47,21 @@ class VisionSystem:
         confidence: float | None = None,
         iou_threshold: float | None = None,
         classes: list[int] | None = None,
-        show_display: bool = True,
-        save_output: bool = False,
-        mirror: bool = False,
-        log_detections: bool = False,
+        show_display: bool | None = None,
+        save_output: bool | None = None,
+        mirror: bool | None = None,
+        log_detections: bool | None = None,
         input_source: str | None = None,
     ):
         self.device = device
         self.confidence = confidence
         self.iou_threshold = iou_threshold
         self.classes = classes
-        self.show_display = show_display
-        self.save_output = save_output
-        self.mirror = mirror
-        self.log_detections = log_detections
+        # BUG-40 fix: fall back to DISPLAY config defaults when not explicitly set
+        self.show_display = DISPLAY.show_window if show_display is None else show_display
+        self.save_output = DISPLAY.save_output if save_output is None else save_output
+        self.mirror = DISPLAY.mirror if mirror is None else mirror
+        self.log_detections = DISPLAY.log_detections if log_detections is None else log_detections
         self.input_source = input_source
 
         self.camera: CameraCapture | None = None
@@ -213,7 +214,7 @@ class VisionSystem:
                     if key == ord("q"):
                         logger.info(t("user_quit"))
                         break
-                    elif key == ord("s"):
+                    if key == ord("s"):
                         self._save_screenshot(output_frame)
                     elif key == ord("r"):
                         self.visualizer.reset_fps()
@@ -303,10 +304,6 @@ class VisionSystem:
 
         self._running = False
         logger.info(t("system_ready"))
-
-    def stop(self):
-        """Stop from outside / 外部调用停止."""
-        self._running = False
 
 
 class DetectionLogger:

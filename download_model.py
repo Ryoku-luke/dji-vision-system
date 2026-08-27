@@ -150,12 +150,11 @@ class ModelDownloader:
         """Format a byte count into a human-readable string (e.g. "10.3 MB")."""
         if size_bytes < 1024:
             return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
+        if size_bytes < 1024 * 1024:
             return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
+        if size_bytes < 1024 * 1024 * 1024:
             return f"{size_bytes / 1024 / 1024:.1f} MB"
-        else:
-            return f"{size_bytes / 1024 / 1024 / 1024:.2f} GB"
+        return f"{size_bytes / 1024 / 1024 / 1024:.2f} GB"
 
     @staticmethod
     def print_progress(downloaded: int, total: int):
@@ -174,7 +173,7 @@ class ModelDownloader:
 
         percent = min(downloaded / total, 1.0)
         filled = int(bar_length * percent)
-        bar = "=" * filled + "-" * (bar_length - filled)
+        bar = "=" * filled + "-" * (bar_length - filled)  # pylint: disable=disallowed-name
         percent_str = f"{percent * 100:.1f}%"
         size_str = f"{ModelDownloader.format_size(downloaded)} / {ModelDownloader.format_size(total)}"
         print(f"\r  [{bar}] {percent_str} ({size_str})", end="", flush=True)
@@ -191,7 +190,7 @@ class ModelDownloader:
 
         if not force:
             print(f"Model already exists / 模型已存在: {model_dir}")
-            print(f"To re-download, use the --force flag / 如需重新下载, 请使用 --force 参数:")
+            print("To re-download, use the --force flag / 如需重新下载, 请使用 --force 参数:")
             print(f"  python download_model.py --model {model_name} --force")
             return False
 
@@ -214,7 +213,7 @@ class ModelDownloader:
         )
 
         downloaded = 0
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req) as response:  # nosec B310 - URL is built from controlled constants
             total_size = int(response.headers.get("Content-Length", 0))
             chunk_size = 8192
 
@@ -312,14 +311,14 @@ class ModelDownloader:
                 print(f"Error: missing model file / 错误: 缺少模型文件: {model_dir.name}")
                 return False
             return True
-        else:
-            # OpenVINO: verify .xml and .bin
-            required_files = [f"{model_name}.xml", f"{model_name}.bin"]
-            missing = [f for f in required_files if not (model_dir / f).exists()]
-            if missing:
-                print(f"Error: missing required model files / 错误: 缺少必要的模型文件: {', '.join(missing)}")
-                return False
-            return True
+
+        # OpenVINO: verify .xml and .bin
+        required_files = [f"{model_name}.xml", f"{model_name}.bin"]
+        missing = [f for f in required_files if not (model_dir / f).exists()]
+        if missing:
+            print(f"Error: missing required model files / 错误: 缺少必要的模型文件: {', '.join(missing)}")
+            return False
+        return True
 
     @staticmethod
     def _compute_sha256(file_path: Path) -> str:
@@ -330,7 +329,7 @@ class ModelDownloader:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    def _verify_checksum(self, file_path: Path, model_name: str) -> bool:
+    def _verify_checksum(self, file_path: Path) -> bool:
         """Verify file integrity via SHA256 checksum.
 
         Downloads a checksums.txt file from the Release and verifies the
@@ -348,11 +347,11 @@ class ModelDownloader:
                 checksum_url,
                 headers={"User-Agent": "dji-vision-system/1.0"},
             )
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req) as response:  # nosec B310 - URL is built from controlled constants
                 checksums_text = response.read().decode("utf-8")
         except urllib.error.HTTPError:
-            print(f"  Warning: checksums.txt not found, skipping SHA256 verification")
-            print(f"  警告: 未找到 checksums.txt, 跳过 SHA256 校验")
+            print("  Warning: checksums.txt not found, skipping SHA256 verification")
+            print("  警告: 未找到 checksums.txt, 跳过 SHA256 校验")
             return True
 
         # Parse checksums file (format: "<hash>  <filename>")
@@ -370,13 +369,13 @@ class ModelDownloader:
 
         actual_hash = self._compute_sha256(file_path)
         if actual_hash != expected_hash:
-            print(f"  Error: SHA256 mismatch!")
+            print("  Error: SHA256 mismatch!")
             print(f"    Expected: {expected_hash}")
             print(f"    Actual:   {actual_hash}")
-            print(f"  The downloaded file may be corrupted, please retry with --force")
+            print("  The downloaded file may be corrupted, please retry with --force")
             return False
 
-        print(f"  SHA256 verification passed / SHA256 校验通过")
+        print("  SHA256 verification passed / SHA256 校验通过")
         return True
 
     def download(self, model_name: str, force: bool = False) -> bool:
@@ -398,17 +397,17 @@ class ModelDownloader:
         # TensorRT: engines are GPU-specific, cannot be pre-distributed
         if self.backend == "tensorrt":
             print("=" * 60)
-            print(f"  TensorRT backend / TensorRT 后端")
+            print("  TensorRT backend / TensorRT 后端")
             print("=" * 60)
-            print(f"TensorRT engines are compiled for specific GPU architectures")
-            print(f"and cannot be pre-distributed. Please export locally:")
-            print(f"TensorRT 引擎与 GPU 架构绑定, 无法预分发, 请在本地导出:")
-            print(f"")
+            print("TensorRT engines are compiled for specific GPU architectures")
+            print("and cannot be pre-distributed. Please export locally:")
+            print("TensorRT 引擎与 GPU 架构绑定, 无法预分发, 请在本地导出:")
+            print("")
             print(f"  python export_model.py --model {model_name}.pt")
-            print(f"")
-            print(f"Then set backend in config.py:")
-            print(f"在 config.py 中设置后端:")
-            print(f'  MODEL.backend = "tensorrt"')
+            print("")
+            print("Then set backend in config.py:")
+            print("在 config.py 中设置后端:")
+            print('  MODEL.backend = "tensorrt"')
             print(f"{'=' * 60}")
             return True
 
@@ -426,7 +425,7 @@ class ModelDownloader:
         print(f"  Download pre-exported model / 下载预导出模型: {model_name}")
         print(f"  Version / 版本: {self.version}")
         print(f"  Backend / 后端: {self.backend}")
-        print(f"  Source / 来源: GitHub Release")
+        print("  Source / 来源: GitHub Release")
         print(f"  Description / 描述: {info['description']}")
         print(f"  Estimated size / 预估大小: {info['size_mb']:.1f} MB")
         print("=" * 60)
@@ -442,21 +441,21 @@ class ModelDownloader:
 
         try:
             # Step 1: download / 第 1 步: 下载
-            print(f"\n[1/4] Downloading model file / 下载模型文件...")
+            print("\n[1/4] Downloading model file / 下载模型文件...")
             print(f"  URL: {url}")
             downloaded_bytes = self._download_file(url, temp_file)
             print(f"  Download complete / 下载完成: {self.format_size(downloaded_bytes)}")
 
             # Step 2: SHA256 verification / 第 2 步: SHA256 校验
-            print(f"\n[2/4] Verifying SHA256 checksum / 校验 SHA256 哈希...")
-            if not self._verify_checksum(temp_file, model_name):
+            print("\n[2/4] Verifying SHA256 checksum / 校验 SHA256 哈希...")
+            if not self._verify_checksum(temp_file):
                 if temp_file.exists():
                     temp_file.unlink()
                 return False
 
             # Step 3: extract or move / 第 3 步: 解压或移动
             if needs_extract:
-                print(f"\n[3/4] Extracting model file / 解压模型文件...")
+                print("\n[3/4] Extracting model file / 解压模型文件...")
                 model_dir = self._extract_model(temp_file, model_name)
                 print(f"  Extraction complete / 解压完成: {model_dir}")
 
@@ -469,10 +468,10 @@ class ModelDownloader:
                 model_dir = temp_file
 
             # Step 4: verify model files / 第 4 步: 验证模型文件
-            print(f"\n[4/4] Verifying model files / 验证模型文件...")
+            print("\n[4/4] Verifying model files / 验证模型文件...")
             if not self._verify_model(model_dir, model_name):
                 return False
-            print(f"  Verification passed: all required files present / 验证通过: 所有必要文件均存在")
+            print("  Verification passed: all required files present / 验证通过: 所有必要文件均存在")
 
             # Compute actual size / 计算实际大小
             if needs_extract:
@@ -482,12 +481,12 @@ class ModelDownloader:
             else:
                 total_size = temp_file.stat().st_size
 
-            print(f"\nModel download complete! / 模型下载完成!")
+            print("\nModel download complete! / 模型下载完成!")
             print(f"  Path / 路径: {model_dir}")
             print(f"  Size / 大小: {self.format_size(total_size)}")
             print(f"  Backend / 后端: {self.backend}")
-            print(f"\nYou can now run main.py to start inference / 现在可以运行 main.py 启动推理:")
-            print(f"  python main.py")
+            print("\nYou can now run main.py to start inference / 现在可以运行 main.py 启动推理:")
+            print("  python main.py")
 
             return True
 
@@ -495,16 +494,16 @@ class ModelDownloader:
             print(f"\nDownload failed: HTTP {e.code} {e.reason}")
             print(f"下载失败: HTTP {e.code} {e.reason}")
             if e.code == 404:
-                print(f"\nModel file not found (HTTP 404). Possible reasons / 模型文件未找到 (HTTP 404)。可能的原因:")
+                print("\nModel file not found (HTTP 404). Possible reasons / 模型文件未找到 (HTTP 404)。可能的原因:")
                 print(f"  1. Release {self.version} has not been created yet / Release {self.version} 尚未创建")
                 print(f"  2. The pre-exported model for {model_name} ({self.backend}) has not been uploaded")
                 print(f"     / {model_name} ({self.backend}) 的预导出模型尚未上传到 Release")
-                print(f"  3. Misspelled model name / 模型名称拼写错误")
-                print(f"\nPlease check the GitHub Release page / 请检查 GitHub Release 页面:")
+                print("  3. Misspelled model name / 模型名称拼写错误")
+                print("\nPlease check the GitHub Release page / 请检查 GitHub Release 页面:")
                 print(f"  https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases")
             elif e.code == 403:
-                print(f"\nAccess denied (HTTP 403). This may be rate limiting, please retry later.")
-                print(f"访问被拒绝 (HTTP 403)。可能是速率限制, 请稍后重试。")
+                print("\nAccess denied (HTTP 403). This may be rate limiting, please retry later.")
+                print("访问被拒绝 (HTTP 403)。可能是速率限制, 请稍后重试。")
             else:
                 print(f"\nServer returned an error status code / 服务器返回错误状态码: {e.code}")
 
@@ -513,13 +512,13 @@ class ModelDownloader:
 
         except urllib.error.URLError as e:
             print(f"\nNetwork error / 网络错误: {e.reason}")
-            print(f"\nPlease check your network connection and retry / 请检查网络连接后重试。")
+            print("\nPlease check your network connection and retry / 请检查网络连接后重试。")
             self._print_alternative(model_name)
             return False
 
         except zipfile.BadZipFile as e:
             print(f"\nCorrupt archive / 压缩包损坏: {e}")
-            print(f"The downloaded file may be incomplete or corrupted, please retry / 下载的文件可能不完整或已损坏, 请重试。")
+            print("The downloaded file may be incomplete or corrupted, please retry / 下载的文件可能不完整或已损坏, 请重试。")
             self._print_alternative(model_name)
             return False
 
@@ -543,17 +542,17 @@ class ModelDownloader:
     def _print_alternative(model_name: str):
         """Print the manual-export fallback instructions."""
         print(f"\n{'=' * 60}")
-        print(f"  Alternative: export the model manually / 替代方案: 手动导出模型")
+        print("  Alternative: export the model manually / 替代方案: 手动导出模型")
         print(f"{'=' * 60}")
-        print(f"If the pre-exported model cannot be downloaded, you can export it manually:")
-        print(f"如果无法通过下载获取预导出模型, 可以手动导出:")
-        print(f"")
+        print("If the pre-exported model cannot be downloaded, you can export it manually:")
+        print("如果无法通过下载获取预导出模型, 可以手动导出:")
+        print("")
         print(f"  python export_model.py --model {model_name}.pt")
-        print(f"")
-        print(f"Note: manual INT8 export requires / 注意: 手动导出 INT8 模型需要:")
-        print(f"  1. Network access to download raw PyTorch weights / 联网下载原始 PyTorch 权重")
-        print(f"  2. Network access to download the COCO128 calibration dataset / 联网下载 COCO128 校准数据集")
-        print(f"  3. Running INT8 quantization calibration (~5-15 min) / 执行 INT8 量化校准 (耗时约 5-15 分钟)")
+        print("")
+        print("Note: manual INT8 export requires / 注意: 手动导出 INT8 模型需要:")
+        print("  1. Network access to download raw PyTorch weights / 联网下载原始 PyTorch 权重")
+        print("  2. Network access to download the COCO128 calibration dataset / 联网下载 COCO128 校准数据集")
+        print("  3. Running INT8 quantization calibration (~5-15 min) / 执行 INT8 量化校准 (耗时约 5-15 分钟)")
         print(f"{'=' * 60}")
 
 
@@ -577,21 +576,21 @@ def list_available_models():
         )
 
     print()
-    print(f"  * Sizes are estimates; actual size depends on the download / 大小为预估值, 实际大小以下载为准")
-    print(f"  * Inference speed measured on Intel Core Ultra 7 155H Arc GPU / 推理速度基于 Intel Core Ultra 7 155H Arc GPU 实测")
-    print(f"  * CUDA backend downloads .pt models; OpenVINO downloads INT8 models / CUDA 后端下载 .pt 模型; OpenVINO 下载 INT8 模型")
-    print(f"  * TensorRT engines must be exported locally (GPU-specific) / TensorRT 引擎需本地导出 (与 GPU 绑定)")
+    print("  * Sizes are estimates; actual size depends on the download / 大小为预估值, 实际大小以下载为准")
+    print("  * Inference speed measured on Intel Core Ultra 7 155H Arc GPU / 推理速度基于 Intel Core Ultra 7 155H Arc GPU 实测")
+    print("  * CUDA backend downloads .pt models; OpenVINO downloads INT8 models / CUDA 后端下载 .pt 模型; OpenVINO 下载 INT8 模型")
+    print("  * TensorRT engines must be exported locally (GPU-specific) / TensorRT 引擎需本地导出 (与 GPU 绑定)")
     print()
-    print(f"Download command / 下载命令:")
-    print(f"  python download_model.py --model <model_name> --backend <backend>")
+    print("Download command / 下载命令:")
+    print("  python download_model.py --model <model_name> --backend <backend>")
     print()
-    print(f"Examples / 示例:")
-    print(f"  python download_model.py                                # OpenVINO yolo26s (default)")
-    print(f"  python download_model.py --model yolo26m                # OpenVINO yolo26m")
-    print(f"  python download_model.py --backend cuda                 # CUDA .pt model (yolo26s)")
-    print(f"  python download_model.py --model yolo26n --backend cuda # CUDA yolo26n .pt")
-    print(f"  python download_model.py --backend tensorrt             # TensorRT export guidance")
-    print(f"  python download_model.py --list                         # List available models")
+    print("Examples / 示例:")
+    print("  python download_model.py                                # OpenVINO yolo26s (default)")
+    print("  python download_model.py --model yolo26m                # OpenVINO yolo26m")
+    print("  python download_model.py --backend cuda                 # CUDA .pt model (yolo26s)")
+    print("  python download_model.py --model yolo26n --backend cuda # CUDA yolo26n .pt")
+    print("  python download_model.py --backend tensorrt             # TensorRT export guidance")
+    print("  python download_model.py --list                         # List available models")
 
 
 def main():

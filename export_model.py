@@ -19,23 +19,23 @@ from pathlib import Path
 # Add project root to path / 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import MODEL
+from config import MODEL  # pylint: disable=wrong-import-position
 
 logger = logging.getLogger(__name__)
 
 
-def export_model(model_name: str | None = None, export_device: str = "cpu"):
+def export_model(model_name: str | None = None, export_device: str = "cpu"):  # pylint: disable=too-many-statements
     """Export a YOLO model to OpenVINO format. 导出 YOLO 模型为 OpenVINO 格式。
 
     Args:
         model_name: Model filename (e.g. "yolo26s.pt"); uses config default if None.
         export_device: Device for export ("cpu" or "0" for GPU).
     """
-    from ultralytics import YOLO
+    from ultralytics import YOLO  # pylint: disable=import-outside-toplevel
 
     # Determine model name / 确定模型名称
     name = model_name or MODEL.model_name
-    model_path = MODEL.models_dir / name
+    pt_path = MODEL.models_dir / name  # pylint: disable=redefined-outer-name
 
     print("=" * 60)
     print(f"  Model export / 模型导出: {name}")
@@ -44,7 +44,7 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
     print("=" * 60)
 
     # Check if model file exists; download if missing / 检查模型文件是否存在，不存在则自动下载
-    if not model_path.exists():
+    if not pt_path.exists():
         print(f"\n[1/3] Downloading model / 下载模型: {name}")
         MODEL.models_dir.mkdir(parents=True, exist_ok=True)
         # YOLO constructor auto-downloads to the current working directory
@@ -52,17 +52,21 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
         # Move to models dir (download path is relative to CWD)
         downloaded = Path(name)
         if downloaded.exists():
-            shutil.move(str(downloaded), str(model_path))
+            shutil.move(str(downloaded), str(pt_path))
+            print(f"      Model saved to / 模型已保存到: {pt_path}")
         else:
             # Some versions download to ~/.config/ultralytics or elsewhere
+            # BUG-37 fix: don't print misleading "saved to" message
             logger.warning(
-                f"Downloaded model not found in CWD: {name}; please check the model path. "
-                f"/ 未在当前目录找到下载的模型文件 {name}, 请检查模型路径"
+                "Downloaded model not found in CWD: %s; please check the model path. "
+                "/ 未在当前目录找到下载的模型文件 %s, 请检查模型路径",
+                name, name,
             )
-        print(f"      Model saved to / 模型已保存到: {model_path}")
+            print("      Warning: model file location unknown, export will continue from memory")
+            print("      警告: 模型文件位置未知, 将从内存中继续导出")
     else:
-        print(f"\n[1/3] Model already exists / 模型已存在: {model_path}")
-        yolo = YOLO(str(model_path))
+        print(f"\n[1/3] Model already exists / 模型已存在: {pt_path}")
+        yolo = YOLO(str(pt_path))
 
     # Build export kwargs / 构建导出参数
     export_kwargs = {
@@ -79,13 +83,13 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
         print(f"\n[2/3] Exporting OpenVINO INT8 (calib data: {MODEL.calib_data})")
         print(f"      导出 OpenVINO INT8 (校准数据: {MODEL.calib_data})")
         print(f"      Calibration fraction / 校准比例: {MODEL.calib_fraction*100:.0f}%")
-        print(f"      Note: first INT8 export downloads the calibration dataset, please be patient.")
-        print(f"      注意: 首次 INT8 导出需要下载校准数据集, 请耐心等待...")
+        print("      Note: first INT8 export downloads the calibration dataset, please be patient.")
+        print("      注意: 首次 INT8 导出需要下载校准数据集, 请耐心等待...")
     elif MODEL.half:
         export_kwargs["half"] = True
-        print(f"\n[2/3] Exporting OpenVINO FP16 / 导出 OpenVINO FP16")
+        print("\n[2/3] Exporting OpenVINO FP16 / 导出 OpenVINO FP16")
     else:
-        print(f"\n[2/3] Exporting OpenVINO FP32 / 导出 OpenVINO FP32")
+        print("\n[2/3] Exporting OpenVINO FP32 / 导出 OpenVINO FP32")
 
     # Run export / 执行导出
     export_result = yolo.export(**export_kwargs)
@@ -104,7 +108,7 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
     print(f"\n[3/3] Model ready / 模型已就绪: {target}")
     print("Export complete! You can now run main.py to start inference.")
     print("导出完成! 现在可以运行 main.py 启动推理:")
-    print(f"  python main.py")
+    print("  python main.py")
 
     # Print model size info / 打印模型大小信息
     if target.is_dir():
@@ -114,13 +118,13 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):
     return target
 
 
-def benchmark_model(model_path: Path | None = None):
+def benchmark_model(model_path: Path | None = None):  # pylint: disable=redefined-outer-name
     """Benchmark the exported model. 对导出的模型进行基准测试。
 
     Args:
         model_path: Path to the OpenVINO model; uses config default if None.
     """
-    from ultralytics import YOLO
+    from ultralytics import YOLO  # pylint: disable=import-outside-toplevel
 
     path = model_path or MODEL.exported_path
     print(f"\n{'=' * 60}")
@@ -138,7 +142,7 @@ def benchmark_model(model_path: Path | None = None):
         verbose=True,
     )
 
-    print(f"\nBenchmark results / 基准测试结果:")
+    print("\nBenchmark results / 基准测试结果:")
     # Some ultralytics versions return a float (mAP) instead of a dict.
     # Handle both cases for version compatibility.
     # 某些 ultralytics 版本返回 float (mAP) 而非 dict，需兼容处理。
@@ -158,8 +162,8 @@ def benchmark_model(model_path: Path | None = None):
         fps = 1000.0 / inference_time if inference_time > 0 else 0.0
         print(f"  Frame rate / 对应帧率: {fps:.1f} FPS")
     else:
-        print(f"  Inference speed / 推理速度: N/A")
-        print(f"  Frame rate / 对应帧率: N/A")
+        print("  Inference speed / 推理速度: N/A")
+        print("  Frame rate / 对应帧率: N/A")
     print(f"  mAP50-95: {map_val if map_val is not None else 'N/A'}")
 
     return results

@@ -7,6 +7,7 @@ Captures frames from DJI Osmo Action cameras (UVC webcam mode) via OpenCV.
 
 import time
 import logging
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -52,8 +53,7 @@ class CameraCapture:
         """Open the camera device or video file."""
         if self._is_file:
             return self._open_file()
-        else:
-            return self._open_camera()
+        return self._open_camera()
 
     def _open_camera(self) -> bool:
         """Open the UVC camera device."""
@@ -104,9 +104,9 @@ class CameraCapture:
 
     def _open_file(self) -> bool:
         """Open a video file."""
-        from pathlib import Path
-
-        assert self.source is not None  # _is_file guarantees source is set
+        if self.source is None:
+            logger.error("Internal error: _open_file called with source=None")
+            return False
         file_path = Path(self.source)
         if not file_path.exists():
             logger.error(t("video_not_found", path=self.source))
@@ -150,19 +150,10 @@ class CameraCapture:
         self._read_failed = False
         return frame
 
-    def read_batch(self, count: int = 1) -> list[np.ndarray]:
-        """Read multiple consecutive frames (for warmup or batch processing)."""
-        frames = []
-        for _ in range(count):
-            frame = self.read()
-            if frame is not None:
-                frames.append(frame)
-        return frames
-
     def warmup(self, frames: int = 5):
         """Warm up: read and discard frames to stabilize auto-exposure/white balance."""
         logger.info(t("camera_warmup", frames=frames))
-        for i in range(frames):
+        for _ in range(frames):
             self.read()
             time.sleep(0.05)
         logger.info(t("camera_warmup_done"))
@@ -177,8 +168,8 @@ class CameraCapture:
                     ret, _ = cap.read()
                     if ret:
                         available.append(i)
-            except Exception:
-                pass  # Skip devices that throw on read
+            except Exception as e:
+                logger.debug(t("camera_probe_skip", index=i, error=e))
             finally:
                 cap.release()
         logger.info(t("camera_devices", devices=available))
@@ -186,6 +177,7 @@ class CameraCapture:
 
     @property
     def is_running(self) -> bool:
+        """Whether the camera is currently open and running."""
         return self._is_running
 
     @property
@@ -205,7 +197,7 @@ class CameraCapture:
         self.open()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb):  # pylint: disable=unused-argument
         self.close()
 
     def __del__(self):

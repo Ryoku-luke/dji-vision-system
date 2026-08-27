@@ -30,18 +30,22 @@ class Detection:
 
     @property
     def bbox(self) -> tuple[float, float, float, float]:
+        """Return bounding box as (x1, y1, x2, y2) tuple."""
         return (self.x1, self.y1, self.x2, self.y2)
 
     @property
     def width(self) -> float:
+        """Return bounding box width."""
         return self.x2 - self.x1
 
     @property
     def height(self) -> float:
+        """Return bounding box height."""
         return self.y2 - self.y1
 
     @property
     def center(self) -> tuple[float, float]:
+        """Return bounding box center as (cx, cy) tuple."""
         return ((self.x1 + self.x2) / 2, (self.y1 + self.y2) / 2)
 
 
@@ -54,6 +58,7 @@ class DetectionResult:
 
     @property
     def num_objects(self) -> int:
+        """Return the number of detections."""
         return len(self.detections)
 
     @property
@@ -64,9 +69,11 @@ class DetectionResult:
         return 1000.0 / self.inference_time_ms
 
     def filter_by_class(self, class_ids: list[int]) -> list[Detection]:
+        """Return detections matching the given class IDs."""
         return [d for d in self.detections if d.class_id in class_ids]
 
     def filter_by_confidence(self, threshold: float) -> list[Detection]:
+        """Return detections with confidence >= threshold."""
         return [d for d in self.detections if d.confidence >= threshold]
 
 
@@ -165,10 +172,9 @@ class OpenVINODetector:
         """Pick a fallback device based on the current backend."""
         if MODEL.backend == "openvino":
             return "intel:cpu"
-        elif MODEL.backend in ("cuda", "tensorrt"):
+        if MODEL.backend in ("cuda", "tensorrt"):
             return "cpu"
-        else:
-            return "cpu"
+        return "cpu"
 
     def _check_backend_dependencies(self) -> bool:
         """Check that required dependencies for the current backend are installed."""
@@ -196,7 +202,7 @@ class OpenVINODetector:
 
             if MODEL.backend == "tensorrt":
                 try:
-                    import tensorrt  # noqa: F401
+                    import tensorrt  # noqa: F401  pylint: disable=unused-import
                 except ImportError:
                     logger.error(t("tensorrt_not_installed"))
                     logger.error(t("tensorrt_install_hint"))
@@ -205,7 +211,7 @@ class OpenVINODetector:
 
         if MODEL.backend == "openvino":
             try:
-                import openvino  # noqa: F401
+                import openvino  # noqa: F401  pylint: disable=unused-import
             except ImportError:
                 logger.error(t("openvino_not_installed"))
                 logger.error(t("install_openvino"))
@@ -231,7 +237,11 @@ class OpenVINODetector:
 
         inference_ms = (time.perf_counter() - start_time) * 1000
 
-        detections = self._parse_results(results[0], frame.shape[:2])
+        try:
+            detections = self._parse_results(results[0])
+        except Exception as e:  # BUG-39 fix: parse errors shouldn't crash the program
+            logger.error(t("infer_failed", error=f"parse results: {e}"))
+            return DetectionResult([], 0.0, frame.shape[:2])
 
         return DetectionResult(
             detections=detections,
@@ -239,38 +249,7 @@ class OpenVINODetector:
             frame_shape=frame.shape[:2],
         )
 
-    def detect_batch(self, frames: list[np.ndarray]) -> list[DetectionResult]:
-        """Run batch detection on multiple BGR frames."""
-        if not frames:
-            return []
-
-        if not self._is_loaded:
-            logger.error(t("model_not_loaded"))
-            return [DetectionResult([], 0.0, f.shape[:2]) for f in frames]
-
-        start_time = time.perf_counter()
-
-        # Batch inference also wraps in try/except
-        # 批量推理同样添加异常捕获
-        try:
-            results = self.model.predict(frames, **self._predict_kwargs)
-        except Exception as e:
-            logger.error(t("infer_batch_failed", error=e))
-            return [DetectionResult([], 0.0, f.shape[:2]) for f in frames]
-
-        total_ms = (time.perf_counter() - start_time) * 1000
-        avg_ms = total_ms / len(frames)
-
-        return [
-            DetectionResult(
-                detections=self._parse_results(r, f.shape[:2]),
-                inference_time_ms=avg_ms,
-                frame_shape=f.shape[:2],
-            )
-            for r, f in zip(results, frames)
-        ]
-
-    def _parse_results(self, result: Any, frame_shape: tuple[int, int]) -> list[Detection]:
+    def _parse_results(self, result: Any) -> list[Detection]:
         """Parse Ultralytics results into a list of Detection objects."""
         detections: list[Detection] = []
 
@@ -315,19 +294,20 @@ class OpenVINODetector:
         logger.info(t("model_warmup", iterations=iterations))
         dummy = np.zeros((MODEL.imgsz, MODEL.imgsz, 3), dtype=np.uint8)
 
-        for i in range(iterations):
+        for _ in range(iterations):
             self.model.predict(dummy, **self._predict_kwargs)
 
         logger.info(t("model_warmup_done"))
 
     @property
     def is_loaded(self) -> bool:
+        """Whether the model has been successfully loaded."""
         return self._is_loaded
 
     def __enter__(self):
         self.load()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb):  # pylint: disable=unused-argument
         self.model = None
         self._is_loaded = False

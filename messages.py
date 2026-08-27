@@ -25,7 +25,6 @@ _MSG = {
     "model_warmup_done": {"zh": "预热完成, 推理引擎就绪", "en": "Warmup complete, engine ready"},
     "model_not_loaded": {"zh": "模型未加载, 请先调用 load()", "en": "Model not loaded, call load() first"},
     "infer_failed": {"zh": "推理失败: {error}", "en": "Inference failed: {error}"},
-    "infer_batch_failed": {"zh": "批量推理失败: {error}", "en": "Batch inference failed: {error}"},
     "device_verify_fail": {"zh": "设备 {device} 验证失败: {error}", "en": "Device {device} verification failed: {error}"},
     "device_fallback": {"zh": "回退到 {device}", "en": "Falling back to {device}"},
     "device_fallback_ok": {"zh": "已回退到 {device}", "en": "Fallback to {device} successful"},
@@ -55,6 +54,7 @@ _MSG = {
     "frame_read_fail": {"zh": "读取帧失败, 可能是摄像头断开连接", "en": "Frame read failed, camera may be disconnected"},
     "camera_dropped": {"zh": "摄像头连续丢帧, 可能已断开连接", "en": "Camera frame drops, may be disconnected"},
     "camera_devices": {"zh": "可用摄像头设备: {devices}", "en": "Available cameras: {devices}"},
+    "camera_probe_skip": {"zh": "摄像头 {index} 探测失败, 跳过: {error}", "en": "Camera {index} probe failed, skipping: {error}"},
     # ---- video file ----
     "video_not_found": {"zh": "视频文件不存在: {path}", "en": "Video file not found: {path}"},
     "video_opening": {"zh": "正在打开视频文件: {path}", "en": "Opening video file: {path}"},

@@ -16,12 +16,11 @@ def _detect_api_backend() -> int:
     system = platform.system()
     if system == "Windows":
         return 700   # CAP_MSMF
-    elif system == "Linux":
+    if system == "Linux":
         return 200   # CAP_V4L2
-    elif system == "Darwin":
+    if system == "Darwin":
         return 1200  # CAP_AVFOUNDATION
-    else:
-        return 0     # CAP_ANY
+    return 0     # CAP_ANY
 
 
 @dataclass
@@ -82,10 +81,9 @@ class ModelConfig:
         stem = Path(self.model_name).stem
         if self.backend == "openvino":
             return self.exported_dir / f"{stem}_{precision}_openvino_model"
-        elif self.backend == "tensorrt":
+        if self.backend == "tensorrt":
             return self.exported_dir / f"{stem}_{precision}_engine"
-        else:
-            return self.model_path
+        return self.model_path
 
     @property
     def needs_export(self) -> bool:
