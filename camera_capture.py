@@ -201,4 +201,12 @@ class CameraCapture:
         self.close()
 
     def __del__(self):
-        self.close()
+        # BUG-42 fix: release capture handle but do NOT call logger/t() here.
+        # During interpreter shutdown the logging/messages modules may already
+        # be garbage-collected, which would print noisy tracebacks on exit.
+        cap = getattr(self, "cap", None)
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                pass

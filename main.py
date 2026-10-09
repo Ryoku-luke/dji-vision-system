@@ -271,8 +271,13 @@ class VisionSystem:
         # Use millisecond precision to avoid overwriting rapid screenshots
         # 使用毫秒级精度, 避免快速截图时文件名冲突
         filename = screenshot_dir / f"screenshot_{int(time.time() * 1000)}.jpg"
-        cv2.imwrite(str(filename), frame)
-        logger.info(t("screenshot_saved", path=filename))
+        # BUG-41 fix: check imwrite return value so disk-full / permission errors
+        # are reported instead of silently failing.
+        success = cv2.imwrite(str(filename), frame)
+        if success:
+            logger.info(t("screenshot_saved", path=filename))
+        else:
+            logger.error(t("screenshot_save_fail", path=filename))
 
     def shutdown(self):
         """Release all resources / 关闭所有资源."""
@@ -303,7 +308,7 @@ class VisionSystem:
             cv2.destroyAllWindows()
 
         self._running = False
-        logger.info(t("system_ready"))
+        logger.info(t("system_shutdown"))
 
 
 class DetectionLogger:

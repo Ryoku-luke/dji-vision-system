@@ -15,7 +15,7 @@ _MSG = {
     "init_camera": {"zh": "打开视频源", "en": "Opening video source"},
     "init_output": {"zh": "初始化视频输出", "en": "Initializing video output"},
     "init_done": {"zh": "系统初始化完成", "en": "System initialized"},
-    "system_ready": {"zh": "系统已关闭", "en": "System shutdown"},
+    "system_shutdown": {"zh": "系统已关闭", "en": "System shutdown"},
     "system_closing": {"zh": "正在关闭系统", "en": "Shutting down"},
     # ---- model ----
     "model_loaded": {"zh": "模型加载成功, 设备验证通过", "en": "Model loaded, device verified"},
@@ -69,6 +69,7 @@ _MSG = {
     "stats_line": {"zh": "已处理 {count} 帧, 平均 {fps} FPS, 推理 {ms} ms/帧, 检测到 {objects} 个目标", "en": "{count} frames, avg {fps} FPS, {ms} ms/frame, {objects} objects"},
     "total_stats": {"zh": "总计: {count} 帧, {elapsed}s, 平均 {fps} FPS", "en": "Total: {count} frames, {elapsed}s, avg {fps} FPS"},
     "screenshot_saved": {"zh": "截图已保存: {path}", "en": "Screenshot saved: {path}"},
+    "screenshot_save_fail": {"zh": "截图保存失败: {path}", "en": "Screenshot save failed: {path}"},
     "init_failed": {"zh": "系统初始化失败, 请检查错误信息", "en": "Initialization failed, check error messages"},
     "not_initialized": {"zh": "系统未初始化, 请先调用 initialize()", "en": "System not initialized, call initialize() first"},
     # ---- detection log ----
