@@ -23,6 +23,7 @@ _MSG = {
     "model_warmup": {"zh": "推理引擎预热中 ({iterations} 轮)", "en": "Warming up inference engine ({iterations} rounds)"},
     "model_warmup_skip": {"zh": "跳过预热 (迭代次数无效: {iterations})", "en": "Skipping warmup (invalid iterations: {iterations})"},
     "model_warmup_done": {"zh": "预热完成, 推理引擎就绪", "en": "Warmup complete, engine ready"},
+    "model_warmup_fail": {"zh": "预热失败 (非致命, 继续运行): {error}", "en": "Warmup failed (non-fatal, continuing): {error}"},
     "model_not_loaded": {"zh": "模型未加载, 请先调用 load()", "en": "Model not loaded, call load() first"},
     "infer_failed": {"zh": "推理失败: {error}", "en": "Inference failed: {error}"},
     "device_verify_fail": {"zh": "设备 {device} 验证失败: {error}", "en": "Device {device} verification failed: {error}"},

@@ -294,8 +294,15 @@ class OpenVINODetector:
         logger.info(t("model_warmup", iterations=iterations))
         dummy = np.zeros((MODEL.imgsz, MODEL.imgsz, 3), dtype=np.uint8)
 
-        for _ in range(iterations):
-            self.model.predict(dummy, **self._predict_kwargs)
+        try:
+            for _ in range(iterations):
+                self.model.predict(dummy, **self._predict_kwargs)
+        except Exception as e:
+            # Warmup is non-essential; a failure here shouldn't abort startup
+            # since load() already verified the device works.
+            # 预热非关键路径, 失败不应中断启动 (load() 已验证设备可用)
+            logger.warning(t("model_warmup_fail", error=e))
+            return
 
         logger.info(t("model_warmup_done"))
 

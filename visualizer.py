@@ -71,8 +71,13 @@ class Visualizer:
         extra_info: dict | None = None,
         mirror: bool = False,
     ) -> np.ndarray:
-        """Draw detection results on the frame / 在帧上绘制检测结果."""
-        output = frame.copy()
+        """Draw detection results on the frame / 在帧上绘制检测结果.
+
+        Note: the frame is modified in place and returned. The caller must not
+        rely on the original frame being preserved after this call.
+        注意: 帧会被原地修改后返回, 调用方不应在调用后依赖原始帧内容.
+        """
+        output = frame
 
         # Horizontal mirror (for inverted camera mount) / 画面水平镜像 (相机倒装时使用)
         if mirror:

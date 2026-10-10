@@ -440,6 +440,7 @@ class ModelDownloader:
             temp_file = self.exported_dir / f"{model_name}{cfg.get('target_suffix', '.pt')}"
 
         try:
+            download_ok = False
             # Step 1: download / 第 1 步: 下载
             print("\n[1/4] Downloading model file / 下载模型文件...")
             print(f"  URL: {url}")
@@ -470,6 +471,10 @@ class ModelDownloader:
             # Step 4: verify model files / 第 4 步: 验证模型文件
             print("\n[4/4] Verifying model files / 验证模型文件...")
             if not self._verify_model(model_dir, model_name):
+                # Verification failed: remove the file so next run retries download
+                # 验证失败: 删除文件, 下次运行重新下载
+                if not needs_extract and temp_file.exists():
+                    temp_file.unlink()
                 return False
             print("  Verification passed: all required files present / 验证通过: 所有必要文件均存在")
 
@@ -488,6 +493,7 @@ class ModelDownloader:
             print("\nYou can now run main.py to start inference / 现在可以运行 main.py 启动推理:")
             print("  python main.py")
 
+            download_ok = True
             return True
 
         except urllib.error.HTTPError as e:
@@ -531,6 +537,12 @@ class ModelDownloader:
             # Clean up temp download file (only for zip downloads) / 清理临时下载文件 (仅 zip 模式)
             if needs_extract:
                 temp_file = self.exported_dir / f"_{model_name}_download_tmp.zip"
+                if temp_file.exists():
+                    temp_file.unlink()
+            elif not download_ok:
+                # For .pt direct downloads, remove the partial/invalid file on failure
+                # so the next run doesn't mistake it for a complete model.
+                # 对于 .pt 直接下载, 失败时删除残缺文件, 避免下次运行误判为已下载完成
                 if temp_file.exists():
                     temp_file.unlink()
             # Clean up any leftover temp extract dir / 清理可能残留的临时解压目录
