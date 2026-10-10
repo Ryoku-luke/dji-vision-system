@@ -84,8 +84,25 @@ class Visualizer:
             output = cv2.flip(output, 1)
 
         # Draw detection boxes / 绘制检测框
-        for det in result.detections:
-            self._draw_detection(output, det)
+        # BUG-44 fix: when mirror is on, flip the x-coordinates of detections
+        # so boxes align with objects in the mirrored image.
+        # BUG-44 修复: 镜像时翻转检测框 x 坐标, 使框与镜像画面中的物体对齐.
+        if mirror and result.detections:
+            frame_w = output.shape[1]
+            for det in result.detections:
+                mirrored = Detection(
+                    x1=frame_w - det.x2,
+                    y1=det.y1,
+                    x2=frame_w - det.x1,
+                    y2=det.y2,
+                    confidence=det.confidence,
+                    class_id=det.class_id,
+                    class_name=det.class_name,
+                )
+                self._draw_detection(output, mirrored)
+        else:
+            for det in result.detections:
+                self._draw_detection(output, det)
 
         # Update FPS / 更新 FPS
         current_fps = self.fps_counter.update()
