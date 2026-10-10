@@ -67,6 +67,10 @@ class CameraCapture:
             logger.error(t("camera_check_1"))
             logger.error(t("camera_check_2"))
             logger.error(t("camera_check_3"))
+            # Release the failed VideoCapture to avoid resource leak
+            # 释放失败的 VideoCapture, 避免资源泄漏
+            self.cap.release()
+            self.cap = None
             return False
 
         # Set capture parameters
@@ -117,6 +121,10 @@ class CameraCapture:
 
         if not self.cap.isOpened():
             logger.error(t("video_open_fail", path=self.source))
+            # Release the failed VideoCapture to avoid resource leak
+            # 释放失败的 VideoCapture, 避免资源泄漏
+            self.cap.release()
+            self.cap = None
             return False
 
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))

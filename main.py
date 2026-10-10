@@ -348,6 +348,10 @@ class DetectionLogger:
                 f"{det.x1:.1f}", f"{det.y1:.1f}",
                 f"{det.x2:.1f}", f"{det.y2:.1f}",
             ])
+        # Flush every 100 frames to minimize data loss on crash
+        # 每 100 帧刷新一次, 减少崩溃时数据丢失
+        if frame_number % 100 == 0 and self._file is not None:
+            self._file.flush()
 
     def close(self):
         """Close the log file / 关闭日志文件."""
@@ -413,13 +417,14 @@ Examples / 示例:
                         help="Filter classes, comma-separated / 仅检测指定类别, 逗号分隔 (e.g. person,car,0)")
     parser.add_argument("--input", type=str, default=None,
                         help="Video file path / 视频文件路径 (read from file instead of camera)")
-    parser.add_argument("--no-display", action="store_true",
+    parser.add_argument("--no-display", action="store_false", dest="show_display",
+                        default=None,
                         help="Disable live display window / 不显示实时画面窗口")
-    parser.add_argument("--save", action="store_true",
+    parser.add_argument("--save", action="store_true", default=None,
                         help="Save output video to output/result.mp4 / 保存输出视频")
-    parser.add_argument("--flip", action="store_true",
+    parser.add_argument("--flip", action="store_true", default=None,
                         help="Horizontal mirror / 画面水平镜像 (相机倒装时使用)")
-    parser.add_argument("--log-detections", action="store_true",
+    parser.add_argument("--log-detections", action="store_true", default=None,
                         help="Log detections to CSV / 记录检测结果到 CSV (output/detections.csv)")
     parser.add_argument("--list-cameras", action="store_true",
                         help="List available cameras / 列出可用的摄像头设备")
@@ -456,7 +461,7 @@ Examples / 示例:
         confidence=args.confidence,
         iou_threshold=args.iou,
         classes=class_ids,
-        show_display=not args.no_display,
+        show_display=args.show_display,
         save_output=args.save,
         mirror=args.flip,
         log_detections=args.log_detections,
