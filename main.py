@@ -438,8 +438,12 @@ Examples / 示例:
 
     # List cameras / 列出摄像头
     if args.list_cameras:
-        with CameraCapture() as cam:
-            cam.list_devices()
+        # Don't open a camera just to list devices — list_devices() probes
+        # each index independently, so opening camera 0 is unnecessary and
+        # would print misleading errors if device 0 is in use or missing.
+        # 列出设备时无需打开摄像头 — list_devices() 会独立探测每个索引,
+        # 打开摄像头 0 是多余的, 且在设备 0 被占用或不存在时会产生误导性错误.
+        CameraCapture().list_devices()
         return
 
     # Check model exists / 检查模型是否存在
@@ -469,6 +473,9 @@ Examples / 示例:
     )
 
     if not system.initialize():
+        # Clean up any partially-initialized resources before exiting
+        # 清理部分初始化的资源后再退出
+        system.shutdown()
         logger.error(t("init_failed"))
         sys.exit(1)
 

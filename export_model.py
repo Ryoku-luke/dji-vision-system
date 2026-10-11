@@ -92,7 +92,16 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):  # 
         print("\n[2/3] Exporting OpenVINO FP32 / 导出 OpenVINO FP32")
 
     # Run export / 执行导出
-    export_result = yolo.export(**export_kwargs)
+    try:
+        export_result = yolo.export(**export_kwargs)
+    except Exception as e:
+        print(f"\nExport failed / 导出失败: {e}")
+        print("If INT8 calibration fails, try FP16 or FP32 in config.py:")
+        print("如果 INT8 校准失败, 请在 config.py 中尝试 FP16 或 FP32:")
+        print("  MODEL.int8 = False")
+        print("  MODEL.half = True  # or False for FP32")
+        return None
+
     exported_path = Path(export_result)
     print(f"      Export done / 导出完成: {exported_path}")
 
@@ -182,6 +191,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model_path = export_model(args.model, args.device)
+
+    if model_path is None:
+        sys.exit(1)
 
     if args.benchmark:
         benchmark_model(model_path)
