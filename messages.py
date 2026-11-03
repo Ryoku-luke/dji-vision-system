@@ -84,6 +84,7 @@ _MSG = {
     "video_out_created": {"zh": "视频输出: {path} ({w}x{h} @ {fps}fps)", "en": "Video output: {path} ({w}x{h} @ {fps}fps)"},
     "video_out_fail": {"zh": "无法创建视频文件: {path}", "en": "Cannot create video file: {path}"},
     "video_out_skip": {"zh": "视频输出初始化失败, 将忽略保存功能", "en": "Video output init failed, save disabled"},
+    "video_out_size_mismatch": {"zh": "帧尺寸 {fw}x{fh} 与视频输出尺寸 {w}x{h} 不一致, 该帧已跳过", "en": "Frame size {fw}x{fh} differs from output {w}x{h}, frame skipped"},
     "log_init_skip": {"zh": "检测日志初始化失败, 将忽略日志记录", "en": "Detection log init failed, logging disabled"},
     # ---- resolution ----
     "res_mismatch": {"zh": "请求 {w}x{h}, 实际 {aw}x{ah} (部分相机不支持自定义分辨率)", "en": "Requested {w}x{h}, got {aw}x{ah} (some cameras ignore custom resolution)"},

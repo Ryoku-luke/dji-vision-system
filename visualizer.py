@@ -245,6 +245,7 @@ class VideoWriter:
         self.fps = fps
         self.resolution = resolution
         self.writer: Any = None
+        self._size_warned = False  # Throttle frame-size mismatch warnings
 
     def open(self, resolution: tuple | None = None):
         """Open the video writer / 打开视频写入器."""
@@ -252,22 +253,46 @@ class VideoWriter:
         if res is None:
             raise ValueError("Resolution required / 请指定视频分辨率")
 
+        # Remember the resolution the writer was opened with so write() can
+        # detect mismatched frames.
+        # 记录写入器打开时的分辨率, 供 write() 检测尺寸不匹配的帧.
+        self.resolution = (int(res[0]), int(res[1]))
+
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         self.writer = cv2.VideoWriter(
-            self.output_path, fourcc, self.fps, res
+            self.output_path, fourcc, self.fps, self.resolution
         )
 
         if not self.writer.isOpened():
             logger.error(t("video_out_fail", path=self.output_path))
             return False
 
-        logger.info(t("video_out_created", path=self.output_path, w=res[0], h=res[1], fps=self.fps))
+        logger.info(t("video_out_created", path=self.output_path, w=self.resolution[0], h=self.resolution[1], fps=self.fps))
         return True
 
     def write(self, frame: np.ndarray):
         """Write a frame / 写入一帧."""
-        if self.writer is not None:
-            self.writer.write(frame)
+        if self.writer is None:
+            return
+
+        # VideoWriter silently discards frames whose size differs from the size
+        # it was opened with, producing a truncated video with no warning.
+        # 尺寸不匹配时 VideoWriter 会静默丢弃该帧, 导致输出视频不完整且没有任何提示.
+        if self.resolution is not None:
+            frame_h, frame_w = frame.shape[:2]
+            expected_w, expected_h = self.resolution
+            if (frame_w, frame_h) != (expected_w, expected_h):
+                if not self._size_warned:
+                    logger.warning(
+                        t(
+                            "video_out_size_mismatch",
+                            fw=frame_w, fh=frame_h, w=expected_w, h=expected_h,
+                        )
+                    )
+                    self._size_warned = True
+                return
+
+        self.writer.write(frame)
 
     def close(self):
         """Release resources / 释放资源."""

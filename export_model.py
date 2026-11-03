@@ -14,6 +14,7 @@ import argparse
 import sys
 import shutil
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 # Add project root to path / 添加项目根目录到路径
@@ -24,7 +25,7 @@ from config import MODEL  # pylint: disable=wrong-import-position
 logger = logging.getLogger(__name__)
 
 
-def export_model(model_name: str | None = None, export_device: str = "cpu"):  # pylint: disable=too-many-statements
+def export_model(model_name: str | None = None, export_device: str = "cpu"):  # pylint: disable=too-many-statements,too-many-branches
     """Export a YOLO model to OpenVINO format. 导出 YOLO 模型为 OpenVINO 格式。
 
     Args:
@@ -107,11 +108,32 @@ def export_model(model_name: str | None = None, export_device: str = "cpu"):  # 
 
     # Move to target directory / 重命名到目标目录
     MODEL.exported_dir.mkdir(parents=True, exist_ok=True)
-    target = MODEL.exported_path
+    # Derive the target from the model actually being exported, not from
+    # MODEL.model_name. Otherwise `--model yolo26m.pt` would be stored under the
+    # config default name (e.g. yolo26s_int8_openvino_model), so main.py would
+    # silently load the wrong weights.
+    # 目标路径基于实际导出的模型名 (而非 config 中的 MODEL.model_name),
+    # 否则 --model yolo26m.pt 会被保存为默认名对应的路径, main.py 会静默加载错误的权重.
+    export_cfg = replace(MODEL, model_name=name)
+    target = export_cfg.exported_path
+
+    # CUDA backend loads the .pt directly; moving the exported OpenVINO directory
+    # onto the .pt path would destroy the source model.
+    # CUDA 后端直接使用 .pt, 若把导出的 OpenVINO 目录移动到 .pt 路径会破坏源模型.
+    if MODEL.backend == "cuda":
+        print("\n  Note / 注意: backend='cuda' loads the .pt directly, export is not required.")
+        print("  注意: backend='cuda' 直接使用 .pt 模型, 无需导出.")
+        print(f"  Exported artifacts kept at / 导出产物保留在: {exported_path}")
+        return exported_path
 
     if exported_path != target:
         if target.exists():
-            shutil.rmtree(target)
+            # target may be a directory (OpenVINO) or a file (TensorRT engine).
+            # 目标可能是目录 (OpenVINO) 或文件 (TensorRT engine).
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
         shutil.move(str(exported_path), str(target))
 
     print(f"\n[3/3] Model ready / 模型已就绪: {target}")

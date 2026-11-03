@@ -120,9 +120,20 @@ class VisionSystem:
         if self.save_output:
             logger.info(f"\n[3/3] {t('init_output')}...")
             DISPLAY.output_path.parent.mkdir(parents=True, exist_ok=True)
+            # For video-file input the source fps is known and must be preserved,
+            # otherwise playback speed drifts (a 60fps source written at 30fps
+            # plays back at half speed). Live cameras have no reliable fps, so
+            # the configured output fps is used there.
+            # 视频文件输入的源帧率已知且必须保留, 否则播放速度会失真
+            # (60fps 源按 30fps 写入会变成慢放). 实时摄像头的帧率不可靠,
+            # 因此沿用配置的输出帧率.
+            if self.camera.is_file and self.camera.fps > 0:
+                output_fps = self.camera.fps
+            else:
+                output_fps = DISPLAY.output_fps
             self.video_writer = VideoWriter(
                 output_path=DISPLAY.output_path,
-                fps=DISPLAY.output_fps,
+                fps=output_fps,
             )
             # Use actual camera resolution / 使用摄像头实际分辨率
             actual_width = self.camera.width
