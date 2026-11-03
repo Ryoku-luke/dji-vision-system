@@ -41,6 +41,11 @@ DOWNLOAD_URL_TEMPLATE = (
     "https://github.com/{owner}/{repo}/releases/download/{version}/{asset}"
 )
 
+# Network timeout in seconds / 网络超时时间 (秒)
+# Without an explicit timeout a stalled connection can hang forever.
+# 未设置超时时, 连接挂起会导致程序永久卡住.
+DOWNLOAD_TIMEOUT = 30
+
 # Project root and exported dir / 项目根目录与导出目录
 PROJECT_ROOT = Path(__file__).parent
 EXPORTED_DIR = PROJECT_ROOT / "models" / "exported"
@@ -134,15 +139,18 @@ class ModelDownloader:
         target = self.exported_dir / f"{model_name}{suffix}"
         return target
 
+    def get_asset_name(self, model_name: str) -> str:
+        """Return the Release asset filename for the current backend."""
+        cfg = BACKEND_CONFIG.get(self.backend, BACKEND_CONFIG["openvino"])
+        return f"{model_name}{cfg.get('asset_suffix', '_int8_openvino_model.zip')}"
+
     def get_download_url(self, model_name: str) -> str:
         """Build the Release asset download URL."""
-        cfg = BACKEND_CONFIG.get(self.backend, BACKEND_CONFIG["openvino"])
-        asset_name = f"{model_name}{cfg.get('asset_suffix', '_int8_openvino_model.zip')}"
         return DOWNLOAD_URL_TEMPLATE.format(
             owner=GITHUB_OWNER,
             repo=GITHUB_REPO,
             version=self.version,
-            asset=asset_name,
+            asset=self.get_asset_name(model_name),
         )
 
     @staticmethod
@@ -189,6 +197,13 @@ class ModelDownloader:
             return True
 
         if not force:
+            # An interrupted extraction can leave an incomplete directory behind.
+            # Treat it as missing and re-download instead of aborting forever.
+            # 中断的解压可能留下不完整目录, 应视为缺失并重新下载, 而不是永久拒绝.
+            if not self._verify_model(model_dir, model_name, verbose=False):
+                print(f"Existing model is incomplete / 已有模型不完整: {model_dir}")
+                print("Re-downloading to repair it / 将重新下载以修复")
+                return True
             print(f"Model already exists / 模型已存在: {model_dir}")
             print("To re-download, use the --force flag / 如需重新下载, 请使用 --force 参数:")
             print(f"  python download_model.py --model {model_name} --force")
@@ -213,7 +228,7 @@ class ModelDownloader:
         )
 
         downloaded = 0
-        with urllib.request.urlopen(req) as response:  # nosec B310 - URL is built from controlled constants
+        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as response:  # nosec B310 - URL is built from controlled constants
             total_size = int(response.headers.get("Content-Length", 0))
             chunk_size = 8192
 
@@ -299,7 +314,7 @@ class ModelDownloader:
 
         return model_dir
 
-    def _verify_model(self, model_dir: Path, model_name: str) -> bool:
+    def _verify_model(self, model_dir: Path, model_name: str, verbose: bool = True) -> bool:
         """Verify model file integrity based on backend type.
 
         For OpenVINO, model_dir is the directory containing .xml/.bin.
@@ -308,7 +323,8 @@ class ModelDownloader:
         if self.backend == "cuda":
             # CUDA: verify .pt file exists (model_dir IS the .pt file)
             if not model_dir.exists() or not model_dir.is_file():
-                print(f"Error: missing model file / 错误: 缺少模型文件: {model_dir.name}")
+                if verbose:
+                    print(f"Error: missing model file / 错误: 缺少模型文件: {model_dir.name}")
                 return False
             return True
 
@@ -316,7 +332,8 @@ class ModelDownloader:
         required_files = [f"{model_name}.xml", f"{model_name}.bin"]
         missing = [f for f in required_files if not (model_dir / f).exists()]
         if missing:
-            print(f"Error: missing required model files / 错误: 缺少必要的模型文件: {', '.join(missing)}")
+            if verbose:
+                print(f"Error: missing required model files / 错误: 缺少必要的模型文件: {', '.join(missing)}")
             return False
         return True
 
@@ -329,8 +346,13 @@ class ModelDownloader:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    def _verify_checksum(self, file_path: Path) -> bool:
+    def _verify_checksum(self, file_path: Path, asset_name: str) -> bool:
         """Verify file integrity via SHA256 checksum.
+
+        Args:
+            file_path: local downloaded file.
+            asset_name: the Release asset name recorded in checksums.txt
+                (NOT the local temp filename).
 
         Downloads a checksums.txt file from the Release and verifies the
         downloaded file against the expected hash. If checksums.txt is not
@@ -347,24 +369,30 @@ class ModelDownloader:
                 checksum_url,
                 headers={"User-Agent": "dji-vision-system/1.0"},
             )
-            with urllib.request.urlopen(req) as response:  # nosec B310 - URL is built from controlled constants
+            with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as response:  # nosec B310 - URL is built from controlled constants
                 checksums_text = response.read().decode("utf-8")
         except urllib.error.HTTPError:
             print("  Warning: checksums.txt not found, skipping SHA256 verification")
             print("  警告: 未找到 checksums.txt, 跳过 SHA256 校验")
             return True
+        except urllib.error.URLError as e:
+            # A transient network failure while fetching the checksum should not
+            # abort the model download itself.
+            # 获取校验文件时的临时网络故障不应中断模型下载本身.
+            print(f"  Warning: cannot fetch checksums.txt ({e.reason}), skipping SHA256 verification")
+            print(f"  警告: 无法获取 checksums.txt ({e.reason}), 跳过 SHA256 校验")
+            return True
 
         # Parse checksums file (format: "<hash>  <filename>")
         expected_hash = None
-        target_name = file_path.name
         for line in checksums_text.strip().split("\n"):
             parts = line.strip().split(None, 1)
-            if len(parts) == 2 and parts[1] == target_name:
+            if len(parts) == 2 and parts[1] == asset_name:
                 expected_hash = parts[0]
                 break
 
         if expected_hash is None:
-            print(f"  Warning: {target_name} not found in checksums.txt, skipping verification")
+            print(f"  Warning: {asset_name} not found in checksums.txt, skipping verification")
             return True
 
         actual_hash = self._compute_sha256(file_path)
@@ -449,7 +477,7 @@ class ModelDownloader:
 
             # Step 2: SHA256 verification / 第 2 步: SHA256 校验
             print("\n[2/4] Verifying SHA256 checksum / 校验 SHA256 哈希...")
-            if not self._verify_checksum(temp_file):
+            if not self._verify_checksum(temp_file, self.get_asset_name(model_name)):
                 if temp_file.exists():
                     temp_file.unlink()
                 return False
